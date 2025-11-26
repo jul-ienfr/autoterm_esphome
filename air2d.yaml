@@ -1,14 +1,14 @@
 esphome:
-  name: air2d
-  friendly_name: Autotherm Air2D
+  name: air4d
+  friendly_name: Autotherm Air4D
 
 esp32:
   board: esp32dev
   framework:
-    type: arduino
+    type: esp-idf
 
 external_components:
-  - source: github://tim0816/autoterm_esphome@V1-test
+  - source: github://jul-ienfr/autoterm_esphome@V1-test
     components: [autoterm_uart]
     refresh: 0s
 
@@ -18,19 +18,21 @@ logger:
 
 # Enable Home Assistant API
 api:
-
+  encryption:
+    key: ""
 
 ota:
   - platform: esphome
+    password: ""
 
 wifi:
-  ssid: !secret wifi_VanPi_ssid
-  password: !secret wifi_VanPi_password
-  domain: !secret domain
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
 
   # Enable fallback hotspot (captive portal) in case wifi connection fails
   ap:
-    ssid: "Dieselheater Hotspot"
+    ssid: "Autoterm-4D Fallback Hotspot"
+    password: ""
 
 web_server:
   port: 80
