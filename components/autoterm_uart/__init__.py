@@ -27,7 +27,8 @@ CONF_PANEL_TEMP_OVERRIDE = "panel_temp_override"
 CONF_PANEL_TEMP_OVERRIDE_SENSOR = "sensor"
 CONF_TEMP_SOURCE_SELECT = "temperature_source_select"
 
-TEMP_SOURCE_OPTIONS = ["Intern", "Panel", "Extern", "Home Assistant"]
+# Options affichées dans Home Assistant (compatibilité assurée côté C++ pour les anciens libellés)
+TEMP_SOURCE_OPTIONS = ["Interne", "Panneau", "Externe", "Home Assistant"]
 
 CLIMATE_SCHEMA = climate.climate_schema(AutotermClimate).extend({
     cv.Optional(CONF_DEFAULT_LEVEL, default=4): cv.int_range(min=0, max=9),
@@ -113,7 +114,6 @@ async def to_code(config):
 
     if "fan_level" in config:
         conf = config["fan_level"]
-        # Standardwerte definieren, falls nicht im YAML angegeben
         min_v = conf.get("min_value", 0)
         max_v = conf.get("max_value", 9)
         step_v = conf.get("step", 1)
@@ -123,7 +123,6 @@ async def to_code(config):
     if CONF_CLIMATE in config:
         climate_conf = config[CONF_CLIMATE]
         clim = cg.new_Pvariable(climate_conf[const.CONF_ID])
-       # await cg.register_component(clim, climate_conf)
         await climate.register_climate(clim, climate_conf)
         cg.add(clim.set_default_level(climate_conf[CONF_DEFAULT_LEVEL]))
         cg.add(clim.set_default_temperature(climate_conf[CONF_DEFAULT_TEMPERATURE]))

@@ -1,6 +1,6 @@
 esphome:
   name: air4d
-  friendly_name: Autotherm Air4D
+  friendly_name: Autoterm Air4D
 
 esp32:
   board: esp32dev
@@ -14,9 +14,8 @@ external_components:
 
 logger:
   level: DEBUG
-  baud_rate: 0  # verhindert Konflikt mit UART
+  baud_rate: 0  # Evite un conflit avec l'UART
 
-# Enable Home Assistant API
 api:
   encryption:
     key: ""
@@ -29,7 +28,6 @@ wifi:
   ssid: !secret wifi_ssid
   password: !secret wifi_password
 
-  # Enable fallback hotspot (captive portal) in case wifi connection fails
   ap:
     ssid: "Autoterm-4D Fallback Hotspot"
     password: ""
@@ -38,23 +36,22 @@ web_server:
   port: 80
 
 captive_portal:
-  
+
 uart:
-  - id: uart_panel          # Verbindung zum Bedienteil
+  - id: uart_panel          # Liaison vers le panneau/afficheur
     rx_pin: 16
     tx_pin: 17
     baud_rate: 9600
     rx_buffer_size: 1024
 
-  - id: uart_heater           # Verbindung zur Heizung
+  - id: uart_heater         # Liaison vers le chauffage
     rx_pin: 22
     tx_pin: 23
     baud_rate: 9600
     rx_buffer_size: 1024
 
-
 sensor:
-  # Beispiel: Temperatur aus Home Assistant
+  # Exemple : temperature depuis Home Assistant
   - platform: homeassistant
     entity_id: sensor.innenraum_temperature
     id: innenraum_temperature
@@ -63,42 +60,52 @@ sensor:
 autoterm_uart:
   uart_display_id: uart_panel
   uart_heater_id: uart_heater
+
   climate:
-    name: "Heizung"
+    name: "Chauffage Autoterm"
     default_level: 4
-    default_temperature: 20 °C
+    default_temperature: 20
     default_temp_sensor: 2
+
   internal_temp:
-    name: "Internal Temperature"
+    name: "Temperature interne"
   external_temp:
-    name: "External Temperature"
+    name: "Temperature externe"
   heater_temp:
-    name: "Heater Temperature"
+    name: "Temperature chauffage"
   panel_temp:
-    name: "Panel Temperature"
+    name: "Temperature panneau"
+
   voltage:
-    name: "Voltage"
+    name: "Tension"
     accuracy_decimals: 1
+
   status_text:
-    name: "Status Text"
+    name: "Statut"
+
   fan_speed_set:
-    name: "Fan RPM Set"
+    name: "Ventilateur consigne"
     unit_of_measurement: "rpm"
   fan_speed_actual:
-    name: "Fan RPM Actual"
+    name: "Ventilateur reel"
     unit_of_measurement: "rpm"
+
   pump_frequency:
-    name: "Pump Frequency"
+    name: "Frequence pompe"
     unit_of_measurement: "Hz"
+
   runtime_hours:
-    name: "Betriebsstunden"
+    name: "Heures de fonctionnement"
     accuracy_decimals: 2
   session_runtime:
-    name: "Laufzeit"
+    name: "Duree session"
     accuracy_decimals: 2
+
   fan_level:
-    name: "Fan Level"
+    name: "Niveau ventilateur"
+
   panel_temp_override:
     sensor: innenraum_temperature
+
   temperature_source_select:
-    name: "Temperature Source"
+    name: "Source temperature"
