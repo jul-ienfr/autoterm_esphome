@@ -12,17 +12,23 @@ Pont UART bidirectionnel entre les chauffages diesel **Autoterm/Planar** et leur
 ## 📦 Fonctionnalités
 
 - 🧭 **Bridge UART bidirectionnelle** entre panneau et chauffage
-- 📊 **20+ capteurs** : températures, tension, pompe, carburant, usure, efficacité, diagnostic...
+- 📊 **33+ capteurs** : températures, tension, pompe, carburant, usure, efficacité, diagnostic...
 - 🌡️ **Climate avec presets** : chauffage, auto, ventilation, thermostat, mode puissance
-- 🔴 **5 protections sécurité** : surtempérature, flameout, sous-tension, watchdog
-- 🟡 **PID controller** : régulation fine au lieu de on/off
+- 🔴 **6 protections sécurité** : surtempérature, flameout, sous-tension, burn-out, lockout, watchdog
+- 🟢 **Eco-Adaptive** ⭐ : mode continu sans on/off, feed-forward anti-dépassement
+- 🟡 **PID Gain-Scheduled** : gains par phase (startup/approaching/steady) = -15-20% carburant
+- 🟡 **Antifreeze zones** : 4 zones de puissance asymétriques au lieu de on/off
+- 🟡 **Pre-heating par prédiction** : anticipe les chutes de température
+- 🟡 **Exhaust feedback** : l'efficacité combustion ajuste le PID
 - 🟡 **Maintenance prédictive** : seuils configurables, score d'usure brûleur
 - 🟡 **Prédiction intelligente** : apprentissage des patterns horaires
-- 🟢 **8 modes** : nuit, frost, economy, PID, sleep, prediction, debug, autonomous
-- 🔌 **Protocole étendu** : diagnostic mode, unlock error 37, version firmware, historique
+- 🟢 **10 modes** : eco-adaptive, PID, hystérésis, puissance, ventilation, nuit, frost, economy, sleep, autonomous
+- 🔌 **Protocole étendu** : diagnostic mode, unlock error 37, version firmware, historique, status report
+- 🛡️ **Burn-out protection** : 4 min post-ignition sans arrêt
+- 📊 **Fuel tracking** : consommation instantanée, totale, et quotidienne
 - 🛰️ **Dashboard HTML** : interface web avec graphiques temps réel
 - 🏠 **19 automatisations HA** : alertes, maintenance, confort, énergie, lockout, eco-adaptive
-- 🔧 **Script Arduino** : test UART sans ESPHome pour débugger le hardware
+- 🔧 **Script Arduino** : test UART avec 11 commandes
 
 ---
 
@@ -32,7 +38,7 @@ Pont UART bidirectionnel entre les chauffages diesel **Autoterm/Planar** et leur
 Projet_Autoterm/
 ├── components/autoterm_uart/
 │   ├── __init__.py              ← Registration ESPHome (380+ lignes)
-│   └── autoterm_uart.h          ← Composant C++ complet (3200+ lignes)
+│   └── autoterm_uart.h          ← Composant C++ complet (3900+ lignes)
 ├── air4d.yaml                   ← Config ESPHome production
 ├── air4d_test.yaml              ← Config test diagnostic UART
 ├── secrets.yaml                 ← WiFi + mots de passe (à remplir)
@@ -101,7 +107,7 @@ Module la puissance (niveaux 1-9) proportionnellement à l'erreur de températur
 
 ---
 
-## 🟡 Capteurs (20+)
+## 🟡 Capteurs (33+)
 
 | Capteur | Unité | Description |
 |---------|-------|-------------|
@@ -114,6 +120,7 @@ Module la puissance (niveaux 1-9) proportionnellement à l'erreur de températur
 | `pump_frequency` | Hz | Fréquence pompe |
 | `fuel_consumption` | L/h | Conso instantanée |
 | `total_fuel_consumed` | L | Conso totale cumulée |
+| `daily_fuel_consumed` | L | Conso quotidienne (reset minuit) |
 | `combustion_efficiency` | % | Efficacité combustion |
 | `delta_t` | °C | T° échappement - T° ambiante |
 | `ignition_time` | s | Temps d'allumage |
@@ -122,7 +129,6 @@ Module la puissance (niveaux 1-9) proportionnellement à l'erreur de températur
 | `predicted_temp` | °C | Température prédite |
 | `boot_count` | — | Nombre de boots ESP32 |
 | `free_heap` | B | Mémoire libre |
-| `reset_reason` | texte | Dernière raison de reset |
 | `error_code` | — | Code erreur (byte 2 status) |
 | `total_starts` | — | Nombre total de démarrages |
 | `glow_plug_current` | % | Courant bougie préchauffage (diagnostic) |
@@ -135,32 +141,34 @@ Module la puissance (niveaux 1-9) proportionnellement à l'erreur de températur
 
 | Mode | Description |
 |------|-------------|
-| **Eco-Adaptive** ⭐ | Mode adaptatif continu : module la puissance sans cycles on/off. Réduit carburant, électricité et usure. **Recommandé.** |
-| **PID** | Régulation proportionnelle-intégrale-dérivée (précurseur d'Eco-Adaptive) |
+| **Eco-Adaptive** ⭐ | Mode adaptatif continu : module la puissance sans cycles on/off. Feed-forward, exhaust feedback. **Recommandé.** |
+| **PID Gain-Scheduled** | 3 phases (startup/approaching/steady) avec gains adaptatifs |
+| **Hystérésis** | On/off intelligent avec niveau proportionnel |
 | **Nuit** | Réduit puissance + ventilateur (moins de bruit) |
-| **Frostschutz** | Démarre auto si T° ext < 2°C |
+| **Frost Protection** | 4 zones asymétriques : OFF/1-2/3-5/6-9 selon T° ext |
+| **Pre-heating** | Anticipe les chutes de T° par prédiction horaire |
 | **Fuel Economy** | Tracking + réduction proactive |
 | **Light Sleep** | Réduit consommation en veille |
-| **Prédiction** | Patterns horaires pour préchauffage |
-| **Debug** | Logs à chaud via switch HA |
+| **Burn-out** | Protection 4 min post-ignition |
 | **Autonomous** | Fonctionne sans panneau physique |
 
 ---
 
-## 🏠 Entités Home Assistant
+## 🏠 Entités Home Assistant (50+)
 
 | Type | Nom | Description |
 |------|-----|-------------|
 | Climate | Heating | Thermostat complet avec presets |
-| Sensor | 20+ capteurs | Voir tableau ci-dessus |
-| Text Sensor | error_text, firmware_version, error_log | Infos texte |
+| Sensor | 33+ capteurs | Voir tableau ci-dessus |
+| Text Sensor | error_text, firmware_version, error_log, eco_mode_status | Infos texte |
 | Switch | Night Mode | Mode nuit on/off |
 | Switch | Frost Protection | Protection anti-gel on/off |
 | Switch | Debug Mode | Logs DEBUG à chaud |
 | Button | Restart ESP | Redémarrage ESP32 |
 | Button | Safe Mode | Mode sûr pour récupération |
-| Button | Clear Lockout | Déverrouille error 37 |
+| Button | Clear Lockout | Déverrouille error 37 + état urgence |
 | Button | Prime Fuel Pump | Amorce pompe carburant |
+| Button | Status Report | Snapshot diagnostic complet en 1 clic |
 | Select | Temperature Source | Source de régulation (Int/Panel/Ext/HA) |
 
 ---
