@@ -86,8 +86,8 @@ wifi:
 # MQTT pour monitoring externe (Grafana, InfluxDB, alertes)
 mqtt:
   broker: 192.168.1.100  # ⚠️ À adapter à ton broker MQTT
-  # username: !secret mqtt_username  # Décommenter si authentification requise
-  # password: !secret mqtt_password
+  username: !secret mqtt_username
+  password: !secret mqtt_password
   topic_prefix: autoterm
   log_topic: autoterm/debug
   # Discovery automatique pour Home Assistant (redondant avec API ESPHome)
@@ -535,6 +535,14 @@ autoterm_uart:
   status_report_button:
     name: "Status Report"
     icon: "mdi:file-document-edit"
+
+  # CO sensor (SAVES LIVES — carbon monoxide detection)
+  # ⚠️ Requiert capteur MQ-7 ou détecteur CO dédié sur GPIO34
+  # Arrêt urgence si > 35ppm pendant 3 lectures consécutives
+  # Décommenter et configurer le capteur ADC ci-dessous
+  # co_level:
+  #   name: "CO Level"
+  #   device_class: carbon_monoxide
 
 # Automatisations utiles
 # Exemple: Notification si erreur CRC élevée

@@ -1396,6 +1396,33 @@ void AutotermUART::check_startup_voltage_(float voltage, uint16_t status_code) {
 }
 
 // ===================
+// CO sensor check (SAVES LIVES)
+// ===================
+void AutotermUART::check_co_level_() {
+  if (!co_sensor_ || !heater_running_)
+    return;
+
+  float co_ppm = co_sensor_->state;
+  if (!std::isfinite(co_ppm) || co_ppm < 0.0f)
+    return;
+
+  last_co_ppm_ = co_ppm;
+
+  if (co_ppm >= CO_DANGER_PPM) {
+    co_confirm_count_++;
+    if (co_confirm_count_ >= CO_CONFIRM_REQUIRED) {
+      emergency_stop_("CO level critical: %.1f ppm >= %.1f ppm — LEAK DETECTED", co_ppm, CO_DANGER_PPM);
+      co_confirm_count_ = 0;
+    } else {
+      ESP_LOGW("autoterm_uart", "CO WARNING: %.1f ppm (confirming %u/%u)",
+               co_ppm, static_cast<unsigned>(co_confirm_count_), static_cast<unsigned>(CO_CONFIRM_REQUIRED));
+    }
+  } else {
+    co_confirm_count_ = 0;  // Reset if CO drops below threshold
+  }
+}
+
+// ===================
 // Statistics
 // ===================
 void AutotermUART::load_stats_() {

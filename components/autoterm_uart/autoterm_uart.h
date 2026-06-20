@@ -439,6 +439,13 @@ class AutotermUART : public Component {
   // Safety: voltage dip confirmation counter (requires 2 consecutive low-voltage readings)
   uint8_t voltage_dip_confirm_count_{0};
 
+  // CO sensor: carbon monoxide detection (SAVES LIVES)
+  sensor::Sensor *co_sensor_{nullptr};
+  float last_co_ppm_{0.0f};
+  uint8_t co_confirm_count_{0};
+  static constexpr float CO_DANGER_PPM = 35.0f;  // Emergency shutdown above this
+  static constexpr uint8_t CO_CONFIRM_REQUIRED = 3;  // Require 3 consecutive readings
+
   // Cached values for safety checks (updated from parse_status)
   float last_heater_temp_c_{NAN};
   float last_pump_freq_c_{0.0f};
@@ -498,6 +505,7 @@ class AutotermUART : public Component {
   void set_combustion_efficiency_sensor(sensor::Sensor *s) { combustion_efficiency_sensor_ = s; }
   void set_delta_t_sensor(sensor::Sensor *s) { delta_t_sensor_ = s; }
   void set_ignition_time_sensor(sensor::Sensor *s) { ignition_time_sensor_ = s; }
+  void set_co_sensor(sensor::Sensor *s) { co_sensor_ = s; }
   void set_boot_count_sensor(sensor::Sensor *s) { boot_count_sensor_ = s; }
   void set_free_heap_sensor(sensor::Sensor *s) { free_heap_sensor_ = s; }
   void set_reset_reason_sensor(text_sensor::TextSensor *s) { reset_reason_sensor_ = s; }
@@ -629,6 +637,9 @@ class AutotermUART : public Component {
     if (heater_running_ && !emergency_shutdown_active_ && !burnout_protection_active_) {
       check_flameout_(last_heater_temp_c_, last_pump_freq_c_, now);
     }
+
+    // CO sensor check (SAVES LIVES — runs on every loop)
+    check_co_level_();
 
     // Emergency recovery check (auto-recover after 5 minutes if safe)
     check_emergency_recovery_(now);
@@ -858,6 +869,7 @@ public:
   void check_emergency_recovery_(uint32_t now);
   void check_flameout_(float heater_temp, float pump_freq, uint32_t now);
   void check_startup_voltage_(float voltage, uint16_t status_code);
+  void check_co_level_();
   void emergency_stop_(const char *reason);
 
   // New: Statistics

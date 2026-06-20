@@ -285,6 +285,15 @@ CONFIG_SCHEMA = cv.Schema({
         state_class=const.STATE_CLASS_MEASUREMENT,
     ),
 
+    # CO sensor (SAVES LIVES — carbon monoxide detection)
+    cv.Optional("co_level"): sensor.sensor_schema(
+        unit_of_measurement="ppm",
+        icon="mdi:smoke",
+        accuracy_decimals=0,
+        state_class=const.STATE_CLASS_MEASUREMENT,
+        device_class=const.DEVICE_CLASS_CARBON_MONOXIDE,
+    ),
+
     # Extended protocol: error/history sensors
     cv.Optional(CONF_ERROR_CODE): sensor.sensor_schema(
         icon="mdi:alert-circle",
@@ -458,6 +467,7 @@ async def to_code(config):
         (CONF_BOARD_TEMP, "set_board_temp_sensor"),
         (CONF_ERROR_CODE, "set_error_code_sensor"),
         (CONF_TOTAL_STARTS, "set_total_starts_sensor"),
+        ("co_level", "set_co_sensor"),
     ]:
         if key in config:
             sens = await sensor.new_sensor(config[key])
