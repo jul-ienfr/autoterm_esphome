@@ -67,6 +67,7 @@ CONF_ECO_MIN_LEVEL = "eco_min_level"
 CONF_ECO_MAX_LEVEL = "eco_max_level"
 CONF_ECO_DEADBAND = "eco_deadband"
 CONF_ECO_OVERSHOOT_PREDICT = "eco_overshoot_predict"
+CONF_MAX_PUMP_FREQ = "max_pump_freq"
 CONF_ECO_ADAPTIVE_LEVEL = "eco_adaptive_level"
 CONF_ECO_ADAPTIVE_ERROR = "eco_adaptive_error"
 CONF_ECO_POWER_EFFICIENCY = "eco_power_efficiency"
@@ -209,6 +210,7 @@ CONFIG_SCHEMA = cv.Schema({
     cv.Optional(CONF_ECO_MAX_LEVEL, default=9): cv.int_range(min=1, max=9),
     cv.Optional(CONF_ECO_DEADBAND, default=0.3): cv.float_range(min=0.0, max=2.0),
     cv.Optional(CONF_ECO_OVERSHOOT_PREDICT, default=True): cv.boolean,
+    cv.Optional(CONF_MAX_PUMP_FREQ, default=5.0): cv.float_range(min=1.0, max=10.0),
     cv.Optional(CONF_ECO_ADAPTIVE_LEVEL): sensor.sensor_schema(
         icon="mdi:thermostat",
         accuracy_decimals=0,
@@ -525,6 +527,8 @@ async def to_code(config):
         cg.add(var.set_eco_deadband(config[CONF_ECO_DEADBAND]))
     if CONF_ECO_OVERSHOOT_PREDICT in config:
         cg.add(var.enable_eco_overshoot_predict(config[CONF_ECO_OVERSHOOT_PREDICT]))
+    if CONF_MAX_PUMP_FREQ in config:
+        cg.add(var.set_max_pump_freq(config[CONF_MAX_PUMP_FREQ]))
 
     # Eco-Adaptive sensors
     for key, setter in [

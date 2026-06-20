@@ -376,7 +376,9 @@ void AutotermUART::set_heater_running_state_(bool running) {
     session_runtime_hours_ = 0.0f;
     session_runtime_last_published_ = NAN;
     publish_session_runtime_(true);
+    heater_stopped_ms_ = 0;  // Reset stop timer
   } else {
+    heater_stopped_ms_ = now;  // Record when heater stopped
     publish_runtime_hours_(true);
     publish_session_runtime_(true);
     maybe_save_runtime_hours_(now, true);
@@ -511,9 +513,28 @@ void AutotermUART::load_fuel_data_() {
 }
 
 void AutotermUART::update_fuel_consumption_(float pump_freq) {
-  // Estimate L/h from pump frequency
-  // Autoterm pumps are typically 2-6 Hz, with ~0.085 L/h per Hz
-  fuel_consumption_lph_ = pump_freq * FUEL_LITERS_PER_HZ;
+  // Cap pump frequency to reduce mechanical stress on fuel pump
+  float capped_freq = std::min(pump_freq, max_pump_freq_hz_);
+
+  // Smooth pump frequency over 30-second window to reduce mechanical stress
+  // Rapid frequency changes cause diaphragm fatigue
+  uint32_t now = millis();
+  if (last_pump_smooth_ms_ > 0) {
+    float dt = static_cast<float>(now - last_pump_smooth_ms_) / 1000.0f;
+    if (dt > 0.0f && dt < 60.0f) {
+      // Exponential moving average with 30-second time constant
+      float alpha = dt / (30.0f + dt);
+      smoothed_pump_freq_ = smoothed_pump_freq_ * (1.0f - alpha) + capped_freq * alpha;
+    } else {
+      smoothed_pump_freq_ = capped_freq;
+    }
+  } else {
+    smoothed_pump_freq_ = capped_freq;
+  }
+  last_pump_smooth_ms_ = now;
+
+  // Estimate L/h from smoothed pump frequency
+  fuel_consumption_lph_ = smoothed_pump_freq_ * FUEL_LITERS_PER_HZ;
 
   // Accumulate fuel consumed using ACTUAL elapsed time (not hardcoded interval)
   uint32_t now = millis();
@@ -630,6 +651,27 @@ void AutotermUART::update_combustion_efficiency_(float heater_temp, float ambien
 
   if (delta_t_sensor_) delta_t_sensor_->publish_state(delta_t_c_);
   if (combustion_efficiency_sensor_) combustion_efficiency_sensor_->publish_state(combustion_efficiency_pct_);
+
+  // Track combustion efficiency trend for predictive maintenance
+  if (combustion_efficiency_pct_ > 0.0f) {
+    efficiency_sum_ += combustion_efficiency_pct_;
+    efficiency_samples_++;
+
+    // Update baseline every 100 samples (~200s at 2s polling)
+    if (efficiency_samples_ >= 100) {
+      float avg = efficiency_sum_ / efficiency_samples_;
+      if (efficiency_baseline_ > 0.0f) {
+        efficiency_trend_ = avg - efficiency_baseline_;  // Positive = improving, negative = degrading
+        if (efficiency_trend_ < -10.0f) {
+          ESP_LOGW("autoterm_uart", "Combustion efficiency degrading: %.1f%% trend (baseline=%.1f%%)",
+                   efficiency_trend_, efficiency_baseline_);
+        }
+      }
+      efficiency_baseline_ = avg;
+      efficiency_sum_ = 0.0f;
+      efficiency_samples_ = 0;
+    }
+  }
 }
 
 // ===================
@@ -1877,6 +1919,18 @@ bool AutotermUART::send_command_(uint8_t command, const std::vector<uint8_t> &pa
   uint32_t now = millis();
   if (!check_command_rate_limit_(now))
     return false;
+
+  // Minimum run time check: prevent rapid restart cycles (extends glow plug and pump life)
+  // Only applies to start commands (0x01 = power start, 0x23 = fan only)
+  if (!heater_running_ && heater_stopped_ms_ > 0 &&
+      (command == FUNC_POWER_START || command == FUNC_FAN_ONLY)) {
+    uint32_t time_since_stop = now - heater_stopped_ms_;
+    if (time_since_stop < MIN_RUN_TIME_MS) {
+      ESP_LOGW("autoterm_uart", "Min run time: refusing start (%.0fs since last stop, min 600s)",
+               time_since_stop / 1000.0f);
+      return false;
+    }
+  }
 
   std::vector<uint8_t> frame;
   frame.reserve(5 + payload.size() + 2);

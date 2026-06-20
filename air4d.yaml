@@ -424,6 +424,7 @@ autoterm_uart:
   eco_max_level: 9     # Niveau maximum
   eco_deadband: 0.3    # Zone morte ±0.3°C = pas de changement de niveau
   eco_overshoot_predict: true  # Feed-forward: réduit la puissance quand la T monte vite
+  max_pump_freq: 5.0  # Hz (max 6, réduit à 5 pour moins de stress mécanique pompe)
 
   # Seuils maintenance configurables (en heures)
   maintenance_oil_hours: 500.0     # Changement huile

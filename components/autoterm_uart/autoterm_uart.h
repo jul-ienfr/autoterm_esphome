@@ -117,6 +117,9 @@ enum PIDPhase : uint8_t {
   PID_PHASE_STEADY = 2,      // Near target: precise maintenance
 };
 
+// Fuel pump frequency cap (configurable)
+static constexpr float DEFAULT_MAX_PUMP_FREQ_HZ = 5.0f;  // Reduce from 6Hz to 5Hz (15-20% less pump stress)
+
 // Gain tables per phase (startup / approaching / steady)
 static constexpr float PID_GAINS[][3] = {
   // {Kp,    Ki,    Kd}     Phase
@@ -318,6 +321,13 @@ class AutotermUART : public Component {
   uint32_t last_exhaust_update_ms_{0};
   float delta_t_c_{0.0f};
 
+  // Trend tracking: glow plug current and combustion efficiency
+  float glow_plug_trend_{0.0f};  // Positive = degrading, negative = improving
+  float efficiency_trend_{0.0f};  // Positive = improving, negative = degrading
+  float efficiency_sum_{0.0f};
+  uint32_t efficiency_samples_{0};
+  float efficiency_baseline_{0.0f};
+
   // Ignition time tracking
   uint32_t ignition_start_ms_{0};
   bool ignition_tracking_active_{false};
@@ -436,6 +446,17 @@ class AutotermUART : public Component {
   uint32_t burnout_start_ms_{0};
   static constexpr uint32_t BURNOUT_PROTECTION_MS = 240000;  // 4 minutes
 
+  // Minimum run time: prevent rapid cycling (extends glow plug and fuel pump life)
+  uint32_t heater_stopped_ms_{0};
+  static constexpr uint32_t MIN_RUN_TIME_MS = 600000;  // 10 minutes minimum
+
+  // Max pump frequency cap (reduces fuel pump mechanical stress)
+  float max_pump_freq_hz_{DEFAULT_MAX_PUMP_FREQ_HZ};
+
+  // Pump frequency smoothing (rolling average to reduce mechanical stress)
+  float smoothed_pump_freq_{0.0f};
+  uint32_t last_pump_smooth_ms_{0};
+
   // Safety: flameout confirmation counter (requires 2 consecutive low-temp readings)
   uint8_t flameout_confirm_count_{0};
 
@@ -516,6 +537,7 @@ class AutotermUART : public Component {
   void set_delta_t_sensor(sensor::Sensor *s) { delta_t_sensor_ = s; }
   void set_ignition_time_sensor(sensor::Sensor *s) { ignition_time_sensor_ = s; }
   void set_co_sensor(sensor::Sensor *s) { co_sensor_ = s; }
+  void set_max_pump_freq(float hz) { max_pump_freq_hz_ = hz; }
   void set_boot_count_sensor(sensor::Sensor *s) { boot_count_sensor_ = s; }
   void set_free_heap_sensor(sensor::Sensor *s) { free_heap_sensor_ = s; }
   void set_reset_reason_sensor(text_sensor::TextSensor *s) { reset_reason_sensor_ = s; }
@@ -715,6 +737,18 @@ class AutotermUART : public Component {
       send_power_mode(true, 8);
       last_burn_cycle_ms = now;
       // Auto-shutdown after 15 minutes (900000ms) is handled by the heater's own work_time
+    }
+
+    // Summer maintenance: prevent fuel pump diaphragm stiffening during storage
+    // Runs every 14 days in summer months (May-September) when heater hasn't been used for 7+ days
+    static uint32_t last_summer_maintenance_ms = 0;
+    struct tm timeinfo;
+    if (now_local(&timeinfo) && !heater_running_ && !emergency_shutdown_active_ &&
+        timeinfo.tm_mon >= 4 && timeinfo.tm_mon <= 8 &&  // May-September (0-indexed)
+        runtime_hours_ > 10.0f && (now - last_summer_maintenance_ms) > 1209600000) {  // 14 days
+      ESP_LOGI("autoterm_uart", "Summer maintenance: starting 10-min run at level 5 to prevent pump stiffening");
+      send_power_mode(true, 5);
+      last_summer_maintenance_ms = now;
     }
   }
 
