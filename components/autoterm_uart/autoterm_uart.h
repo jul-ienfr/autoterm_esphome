@@ -345,6 +345,22 @@ class AutotermUART : public Component {
   bool maintenance_alert_filter_{false};
   bool maintenance_alert_glow_{false};
 
+  // Maintenance counter tracking (hours at last reset, persisted in NVS)
+  float oil_reset_hours_{0.0f};
+  float filter_reset_hours_{0.0f};
+  float glow_reset_hours_{0.0f};
+  ESPPreferenceObject oil_reset_pref_;
+  ESPPreferenceObject filter_reset_pref_;
+  ESPPreferenceObject glow_reset_pref_;
+
+  // Maintenance "since" and "remaining" sensors
+  sensor::Sensor *maintenance_oil_since_sensor_{nullptr};
+  sensor::Sensor *maintenance_oil_remaining_sensor_{nullptr};
+  sensor::Sensor *maintenance_filter_since_sensor_{nullptr};
+  sensor::Sensor *maintenance_filter_remaining_sensor_{nullptr};
+  sensor::Sensor *maintenance_glow_since_sensor_{nullptr};
+  sensor::Sensor *maintenance_glow_remaining_sensor_{nullptr};
+
   // Frost protection
   bool frost_protection_active_{false};
   float frost_protection_temp_c_{FROST_PROTECTION_TEMP_C};
@@ -437,6 +453,12 @@ class AutotermUART : public Component {
   float current_altitude_m_{0.0f};
   float air_density_factor_{1.0f};  // 1.0 at sea level, ~0.78 at 2000m
   static constexpr float SEA_LEVEL_PRESSURE_PA = 101325.0f;
+
+  // Exhaust temp direct probe (optional: Thermocouple K + MAX6675)
+  // When present: more accurate than UART-derived exhaust temp
+  // When absent: falls back to UART temperature (current behavior)
+  sensor::Sensor *exhaust_temp_direct_sensor_{nullptr};
+  bool exhaust_direct_available_{false};
 
   // PID output smoothing (circular buffer of last 3 outputs)
   float pid_output_history_[3] = {0.0f, 0.0f, 0.0f};
@@ -552,6 +574,7 @@ class AutotermUART : public Component {
   void set_co_sensor(sensor::Sensor *s) { co_sensor_ = s; }
   void set_max_pump_freq(float hz) { max_pump_freq_hz_ = hz; }
   void set_altitude_sensor(sensor::Sensor *s) { altitude_sensor_ = s; }
+  void set_exhaust_temp_direct_sensor(sensor::Sensor *s) { exhaust_temp_direct_sensor_ = s; }
   void set_boot_count_sensor(sensor::Sensor *s) { boot_count_sensor_ = s; }
   void set_free_heap_sensor(sensor::Sensor *s) { free_heap_sensor_ = s; }
   void set_reset_reason_sensor(text_sensor::TextSensor *s) { reset_reason_sensor_ = s; }

@@ -430,6 +430,7 @@ autoterm_uart:
   maintenance_oil_hours: 500.0     # Changement huile
   maintenance_filter_hours: 200.0  # Nettoyage filtre
   maintenance_glow_hours: 1000.0   # Remplacement bougie
+  burn_cycle_interval_hours: 100.0 # Nettoyage carbone toutes les Xh de combustion
 
   # Mode économie carburant: suit le temps passé près de la cible
   fuel_economy: true  # Active par défaut (tracking sans impact sur les performances)
@@ -752,9 +753,12 @@ time:
 #     inverted: true  # Normally open = OFF when ESP is off
 
 # --- Capteur Température Échappement (Thermocouple K) ---
-# Mesure directe de la température d'échappement pour meilleur suivi
-# Nécessite: Thermocouple K + MAX6675/MAX31855 (~2€)
-# Plus précis que la valeur lue depuis le protocole Autoterm
+# ⚠️ Le chauffage Autoterm a DÉJÀ un capteur T° échappement intégré
+# qui remonte via le protocole UART (sensor.heater_temp)
+# Cette sonde est UN PLUS pour plus de précision, pas une nécessité
+#
+# Si vous voulez plus de précision :
+# Nécessite: Thermocouple K + MAX6675/MAX31855 (~5€)
 #
 # spi:
 #   clk_pin: GPIO18

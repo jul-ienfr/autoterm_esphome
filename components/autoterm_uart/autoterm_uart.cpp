@@ -634,7 +634,17 @@ void AutotermUART::publish_total_fuel_(bool force) {
 // Combustion efficiency tracking
 // ===================
 void AutotermUART::update_combustion_efficiency_(float heater_temp, float ambient_temp) {
-  if (!std::isfinite(heater_temp) || !std::isfinite(ambient_temp))
+  // Use direct thermocouple if available, otherwise fall back to UART temperature
+  float effective_exhaust_temp = heater_temp;
+  if (exhaust_temp_direct_sensor_ && std::isfinite(exhaust_temp_direct_sensor_->state) &&
+      exhaust_temp_direct_sensor_->state > 0.0f) {
+    effective_exhaust_temp = exhaust_temp_direct_sensor_->state;
+    exhaust_direct_available_ = true;
+  } else {
+    exhaust_direct_available_ = false;
+  }
+
+  if (!std::isfinite(effective_exhaust_temp) || !std::isfinite(ambient_temp))
     return;
 
   // Compute exhaust temp derivative (dT/dt in °C/min)
@@ -642,11 +652,11 @@ void AutotermUART::update_combustion_efficiency_(float heater_temp, float ambien
   if (last_exhaust_update_ms_ > 0 && std::isfinite(last_exhaust_temp_c_)) {
     float dt_min = static_cast<float>(now - last_exhaust_update_ms_) / 60000.0f;
     if (dt_min > 0.01f && dt_min < 5.0f) {  // Sanity: 0.01-5 minutes between updates
-      exhaust_temp_derivative_ = (heater_temp - last_exhaust_temp_c_) / dt_min;
+      exhaust_temp_derivative_ = (effective_exhaust_temp - last_exhaust_temp_c_) / dt_min;
     }
   }
   last_exhaust_update_ms_ = now;
-  last_exhaust_temp_c_ = heater_temp;
+  last_exhaust_temp_c_ = effective_exhaust_temp;
   last_ambient_temp_c_ = ambient_temp;
 
   // Delta-T across heat exchanger

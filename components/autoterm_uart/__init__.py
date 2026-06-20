@@ -308,6 +308,16 @@ CONFIG_SCHEMA = cv.Schema({
         state_class=const.STATE_CLASS_MEASUREMENT,
     ),
 
+    # Exhaust temp direct probe (optional: Thermocouple K + MAX6675)
+    # When present: more accurate than UART-derived exhaust temp
+    # When absent: falls back to UART temperature (no hardware required)
+    cv.Optional("exhaust_temp_direct"): sensor.sensor_schema(
+        unit_of_measurement="°C",
+        icon="mdi:thermometer",
+        accuracy_decimals=1,
+        state_class=const.STATE_CLASS_MEASUREMENT,
+    ),
+
     # Extended protocol: error/history sensors
     cv.Optional(CONF_ERROR_CODE): sensor.sensor_schema(
         icon="mdi:alert-circle",
@@ -485,6 +495,7 @@ async def to_code(config):
         (CONF_TOTAL_STARTS, "set_total_starts_sensor"),
         ("co_level", "set_co_sensor"),
         ("gps_altitude", "set_altitude_sensor"),
+        ("exhaust_temp_direct", "set_exhaust_temp_direct_sensor"),
     ]:
         if key in config:
             sens = await sensor.new_sensor(config[key])
