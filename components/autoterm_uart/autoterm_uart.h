@@ -99,6 +99,7 @@ static constexpr float FROST_PROTECTION_TEMP_C = 2.0f;
 // Safety thresholds
 static constexpr float SAFETY_MAX_HEATER_TEMP_C = 400.0f;     // Emergency shutdown above this
 static constexpr float SAFETY_FLAMEOUT_MIN_TEMP_C = 100.0f;   // Below this = possible flameout
+static constexpr float ANTI_CONDENSATION_TEMP_C = 120.0f;   // Below this, boost power to prevent condensation
 static constexpr uint32_t SAFETY_FLAMEOUT_TIMEOUT_MS = 90000;  // 90s with pump active + low temp (increased to reduce false triggers)
 static constexpr float SAFETY_MIN_STARTUP_VOLTAGE_V = 10.0f;  // Below this, refuse to start
 
@@ -313,6 +314,8 @@ class AutotermUART : public Component {
   float last_ambient_temp_c_{NAN};
   float last_exhaust_temp_c_{NAN};
   float combustion_efficiency_pct_{0.0f};
+  float exhaust_temp_derivative_{0.0f};  // dT_exhaust/dt in °C/min
+  uint32_t last_exhaust_update_ms_{0};
   float delta_t_c_{0.0f};
 
   // Ignition time tracking
@@ -701,6 +704,17 @@ class AutotermUART : public Component {
     if ((now - last_health_log_ms_) > 900000) {
       last_health_log_ms_ = now;
       publish_system_health_();
+    }
+
+    // Burn cycle: periodic high-power run to clean carbon (every 7 days, 15 min at level 8)
+    // Only runs when heater is idle and frost protection is off
+    static uint32_t last_burn_cycle_ms = 0;
+    if (!heater_running_ && !frost_protection_active_ && !emergency_shutdown_active_ &&
+        runtime_hours_ > 10.0f && (now - last_burn_cycle_ms) > 604800000) {  // 7 days
+      ESP_LOGI("autoterm_uart", "Burn cycle: starting 15-min high-power run to clean carbon");
+      send_power_mode(true, 8);
+      last_burn_cycle_ms = now;
+      // Auto-shutdown after 15 minutes (900000ms) is handled by the heater's own work_time
     }
   }
 

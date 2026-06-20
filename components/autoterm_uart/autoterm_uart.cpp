@@ -607,6 +607,15 @@ void AutotermUART::update_combustion_efficiency_(float heater_temp, float ambien
   if (!std::isfinite(heater_temp) || !std::isfinite(ambient_temp))
     return;
 
+  // Compute exhaust temp derivative (dT/dt in °C/min)
+  uint32_t now = millis();
+  if (last_exhaust_update_ms_ > 0 && std::isfinite(last_exhaust_temp_c_)) {
+    float dt_min = static_cast<float>(now - last_exhaust_update_ms_) / 60000.0f;
+    if (dt_min > 0.01f && dt_min < 5.0f) {  // Sanity: 0.01-5 minutes between updates
+      exhaust_temp_derivative_ = (heater_temp - last_exhaust_temp_c_) / dt_min;
+    }
+  }
+  last_exhaust_update_ms_ = now;
   last_exhaust_temp_c_ = heater_temp;
   last_ambient_temp_c_ = ambient_temp;
 
@@ -1147,12 +1156,22 @@ void AutotermUART::check_maintenance_() {
       ESP_LOGW("autoterm_uart", "MAINTENANCE: Oil change due! (%.1f / %.0f hours)", runtime_hours_, maintenance_oil_hrs_);
   }
 
-  // Filter cleaning reminder (configurable threshold)
-  bool filter_alert = runtime_hours_ >= maintenance_filter_hrs_;
+  // Filter cleaning reminder: check BOTH time-based AND fuel-volume-based thresholds
+  // Fuel volume is more accurate than time because filter loading depends on fuel volume, not runtime
+  static constexpr float FILTER_FUEL_VOLUME_LITERS = 50.0f;  // Replace filter every 50 liters
+  bool filter_alert_time = runtime_hours_ >= maintenance_filter_hrs_;
+  bool filter_alert_volume = total_fuel_liters_ >= FILTER_FUEL_VOLUME_LITERS;
+  bool filter_alert = filter_alert_time || filter_alert_volume;
   if (filter_alert != maintenance_alert_filter_) {
     maintenance_alert_filter_ = filter_alert;
-    if (filter_alert)
-      ESP_LOGW("autoterm_uart", "MAINTENANCE: Filter cleaning due! (%.1f / %.0f hours)", runtime_hours_, maintenance_filter_hrs_);
+    if (filter_alert) {
+      if (filter_alert_volume && !filter_alert_time) {
+        ESP_LOGW("autoterm_uart", "MAINTENANCE: Filter cleaning due! (%.1fL / %.0fL fuel volume)",
+                 total_fuel_liters_, FILTER_FUEL_VOLUME_LITERS);
+      } else {
+        ESP_LOGW("autoterm_uart", "MAINTENANCE: Filter cleaning due! (%.1f / %.0f hours)", runtime_hours_, maintenance_filter_hrs_);
+      }
+    }
   }
 
   // Glow plug replacement reminder (configurable threshold)
@@ -2453,6 +2472,16 @@ void AutotermUART::evaluate_eco_adaptive_(bool force) {
       output *= 1.1f;
       ESP_LOGD("autoterm_uart", "ECO: efficiency feedback %.0f%% -> output x1.1", combustion_efficiency_pct_);
     }
+  }
+
+  // Anti-condensation boost: if exhaust temp drops below condensation point, increase power
+  // This prevents water accumulation in the exhaust system which causes rust and damage
+  if (std::isfinite(last_exhaust_temp_c_) && last_exhaust_temp_c_ < ANTI_CONDENSATION_TEMP_C &&
+      last_exhaust_temp_c_ > 50.0f && heater_running_) {
+    // Boost output by 20% to raise exhaust temp above condensation point
+    output *= 1.2f;
+    ESP_LOGD("autoterm_uart", "ECO: anti-condensation boost (exh=%.0f°C < %.0f°C) -> output x1.2",
+             last_exhaust_temp_c_, ANTI_CONDENSATION_TEMP_C);
   }
 
   // Map output to level 1-9
