@@ -2876,7 +2876,7 @@ climate::ClimateTraits AutotermClimate::traits() {
   preset_strings_ = {"power_mode", "heating", "heating+ventilation", "thermostat"};
   fan_mode_strings_.clear();
   for (int i = 0; i <= 9; i++) {
-    fan_mode_strings_.push_back("Stufe " + std::to_string(i));
+    fan_mode_strings_.push_back("Level " + std::to_string(i));
   }
 
   // Convert to const char* vectors
@@ -3074,11 +3074,11 @@ float AutotermClimate::clamp_hysteresis_off_(float value) {
 
 std::string AutotermClimate::fan_mode_label_from_level_(uint8_t level) const {
   level = clamp_level_(level);
-  return "Stufe " + std::to_string(static_cast<int>(level));
+  return "Level " + std::to_string(static_cast<int>(level));
 }
 
 uint8_t AutotermClimate::fan_mode_label_to_level_(const std::string &label) const {
-  const std::string prefix = "Stufe ";
+  const std::string prefix = "Level ";
   if (label.size() <= prefix.size() || label.compare(0, prefix.size(), prefix) != 0)
     return fan_level_;
   std::string digits = label.substr(prefix.size());

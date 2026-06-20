@@ -1,0 +1,215 @@
+views:
+  - title: 🔥 Autoterm
+    path: autoterm
+    icon: mdi:fire
+    type: sections
+    sections:
+
+      # ── Ligne 1: Contrôle principal ──
+      - type: grid
+        cards:
+          - type: thermostat
+            entity: climate.air4d_heating
+            name: "Chauffage"
+          - type: entities
+            title: "🔧 Contrôles"
+            entities:
+              - entity: select.air4d_temperature_source
+                name: "Source T°"
+              - entity: number.air4d_fan_level
+                name: "Niveau ventilateur"
+              - entity: switch.air4d_night_mode
+                name: "🌙 Mode nuit"
+              - entity: switch.air4d_frost_protection
+                name: "❄️ Protection anti-gel"
+              - entity: switch.air4d_debug_mode
+                name: "🐛 Debug mode"
+
+      # ── Ligne 2: Températures ──
+      - type: grid
+        cards:
+          - type: sensor
+            entity: sensor.air4d_internal_temp
+            name: "T° Interne"
+            graph: line
+          - type: sensor
+            entity: sensor.air4d_external_temp
+            name: "T° Externe"
+            graph: line
+          - type: sensor
+            entity: sensor.air4d_heater_temp
+            name: "T° Échappement"
+            graph: line
+          - type: sensor
+            entity: sensor.air4d_predicted_temp
+            name: "T° Prédite"
+
+      # ── Ligne 3: Performance ──
+      - type: grid
+        cards:
+          - type: gauge
+            entity: sensor.air4d_fuel_consumption
+            name: "Conso carburant"
+            unit: "L/h"
+            min: 0
+            max: 1
+            severity:
+              green: 0
+              yellow: 0.3
+              red: 0.6
+          - type: gauge
+            entity: sensor.air4d_combustion_efficiency
+            name: "Efficacité"
+            unit: "%"
+            min: 0
+            max: 100
+            severity:
+              green: 60
+              yellow: 40
+              red: 0
+          - type: gauge
+            entity: sensor.air4d_voltage
+            name: "Tension"
+            unit: "V"
+            min: 9
+            max: 15
+            severity:
+              green: 12
+              yellow: 11
+              red: 10
+          - type: sensor
+            entity: sensor.air4d_pump_frequency
+            name: "Pompe"
+            unit: "Hz"
+
+      # ── Ligne 4: Eco-Adaptive ──
+      - type: grid
+        cards:
+          - type: gauge
+            entity: sensor.air4d_eco_adaptive_level
+            name: "Niveau Adaptatif"
+            min: 0
+            max: 9
+            severity:
+              green: 3
+              yellow: 6
+              red: 8
+          - type: gauge
+            entity: sensor.air4d_eco_power_efficiency
+            name: "Efficacité Énergie"
+            unit: "%"
+            min: 0
+            max: 100
+            severity:
+              green: 60
+              yellow: 30
+              red: 0
+          - type: sensor
+            entity: sensor.air4d_eco_adaptive_error
+            name: "Erreur T°"
+            unit: "°C"
+          - type: sensor
+            entity: sensor.air4d_eco_mode_status
+            name: "État adaptatif"
+
+      # ── Ligne 5: Carburant & Maintenance ──
+      - type: grid
+        cards:
+          - type: statistic
+            entity: sensor.air4d_total_fuel_consumed
+            name: "Carburant total"
+            stat_type: change
+            period: total
+          - type: statistic
+            entity: sensor.air4d_runtime_hours
+            name: "Heures totales"
+            stat_type: change
+            period: total
+          - type: sensor
+            entity: sensor.air4d_session_runtime
+            name: "Durée session"
+          - type: sensor
+            entity: sensor.air4d_total_starts
+            name: "Démarrages"
+
+      # ── Ligne 6: Usure & Maintenance ──
+      - type: gauge
+        entity: sensor.air4d_wear_score
+        name: "Usure brûleur"
+        unit: "%"
+        min: 0
+        max: 100
+        severity:
+          green: 70
+          yellow: 40
+          red: 0
+
+      # ── Ligne 7: Diagnostic ──
+      - type: entities
+        title: "🔬 Diagnostic"
+        entities:
+          - entity: sensor.air4d_error_code
+            name: "Code erreur"
+          - entity: sensor.air4d_error_text
+            name: "Description erreur"
+          - entity: sensor.air4d_firmware_version
+            name: "Version firmware"
+          - entity: sensor.air4d_error_log
+            name: "Journal erreurs"
+          - entity: sensor.air4d_boot_count
+            name: "Boot count"
+          - entity: sensor.air4d_free_heap
+            name: "Heap libre"
+          - entity: sensor.air4d_reset_reason
+            name: "Raison reset"
+
+      # ── Ligne 8: Diagnostic mode (si activé) ──
+      - type: entities
+        title: "📡 Mode Diagnostic"
+        entities:
+          - entity: sensor.air4d_glow_plug_current
+            name: "Bougie préchauffage"
+          - entity: sensor.air4d_chamber_temp
+            name: "T° chambre combustion"
+          - entity: sensor.air4d_board_temp
+            name: "T° carte ECU"
+
+      # ── Ligne 9: Boutons d'action ──
+      - type: entities
+        title: "⚡ Actions"
+        entities:
+          - entity: button.air4d_unlock_button
+            name: "🔓 Déverrouiller (error 37)"
+          - entity: button.air4d_prime_pump_button
+            name: "⛽ Amorcer pompe"
+          - entity: button.air4d_restart
+            name: "🔄 Redémarrer ESP32"
+          - entity: button.air4d_safe_mode
+            name: "🛡️ Mode sûr"
+
+      # ── Ligne 10: Graphiques temporels ──
+      - type: horizontal-stack
+        cards:
+          - type: history-graph
+            title: "📊 T° (24h)"
+            entities:
+              - entity: sensor.air4d_internal_temp
+                name: "Interne"
+              - entity: sensor.air4d_external_temp
+                name: "Externe"
+              - entity: sensor.air4d_heater_temp
+                name: "Échappement"
+            hours_to_show: 24
+          - type: history-graph
+            title: "📊 Niveau Adaptatif (24h)"
+            entities:
+              - entity: sensor.air4d_eco_adaptive_level
+                name: "Niveau"
+              - entity: sensor.air4d_eco_power_efficiency
+                name: "Efficacité %"
+            hours_to_show: 24
+```
+
+---
+
+## 🧪 Tests

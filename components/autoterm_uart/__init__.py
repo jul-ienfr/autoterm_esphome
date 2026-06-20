@@ -9,6 +9,8 @@ import esphome.components.climate as climate
 import esphome.components.select as select
 import esphome.components.button as button
 
+__version__ = "1.0.0"
+
 DEPENDENCIES = ["sensor", "text_sensor", "number", "climate"]
 AUTO_LOAD = ["sensor", "text_sensor", "number", "climate", "select", "button"]
 
