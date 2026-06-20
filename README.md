@@ -58,6 +58,22 @@ Un exemple complet est fourni dans **`air4d.yaml`**.
 Il montre comment intégrer la composante Autoterm UART dans ESPHome.
 Adapte impérativement le fichier à ton **câblage, tes GPIOs et ton matériel**.
 
+> 📌 **Pour le câblage complet**, voir [WIRING.md](WIRING.md) (pinout, conversion de niveau logique, test de validation).
+
+### Config de test (diagnostic UART)
+
+Un fichier **`air4d_test.yaml`** est disponible pour diagnostiquer les problèmes de communication UART :
+- Framework **Arduino** (au lieu d'ESP-IDF)
+- Logger en **DEBUG complet**
+- Utile pour vérifier si le câblage fonctionne avant de passer en production
+
+### Config principale (production)
+
+La config optimisée se trouve dans **`Autoterme_Optimiser/air4d.yaml`** avec :
+- Framework ESP-IDF (unicore, 240MHz)
+- Filtres capteurs, alerte tension, debug mode toggle
+- Web server avec authentification
+
 Pour le mode thermostat, l’hystérésis se définit directement dans le bloc Climate :
 
 ```yaml
