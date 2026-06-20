@@ -19,6 +19,7 @@ AutotermClimate = autoterm_ns.class_("AutotermClimate", climate.Climate)
 AutotermTempSourceSelect = autoterm_ns.class_("AutotermTempSourceSelect", select.Select)
 AutotermUnlockButton = autoterm_ns.class_("AutotermUnlockButton", button.Button)
 AutotermPrimePumpButton = autoterm_ns.class_("AutotermPrimePumpButton", button.Button)
+AutotermStatusReportButton = autoterm_ns.class_("AutotermStatusReportButton", button.Button)
 
 CONF_CLIMATE = "climate"
 CONF_DEFAULT_LEVEL = "default_level"
@@ -52,6 +53,7 @@ CONF_DIAGNOSTIC_MODE = "diagnostic_mode"
 CONF_UNLOCK_BUTTON = "unlock_button"
 CONF_PRIME_PUMP_BUTTON = "prime_pump_button"
 CONF_PRIME_PUMP_FREQUENCY = "prime_frequency"
+CONF_STATUS_REPORT_BUTTON = "status_report_button"
 CONF_ERROR_CODE = "error_code"
 CONF_ERROR_TEXT = "error_text"
 CONF_FIRMWARE_VERSION = "firmware_version"
@@ -309,6 +311,10 @@ CONFIG_SCHEMA = cv.Schema({
     ).extend({
         cv.Optional(CONF_PRIME_PUMP_FREQUENCY, default=1): cv.int_range(min=1, max=255),
     }),
+    cv.Optional(CONF_STATUS_REPORT_BUTTON): button.button_schema(
+        class_=AutotermStatusReportButton,
+        icon="mdi:file-document-edit",
+    ),
 
     # Extended protocol: diagnostic mode
     cv.Optional(CONF_DIAGNOSTIC_MODE, default=False): cv.boolean,
@@ -473,6 +479,13 @@ async def to_code(config):
         btn = await button.new_button(btn_conf)
         cg.add(btn.set_parent(var))
         cg.add(btn.set_frequency(btn_conf[CONF_PRIME_PUMP_FREQUENCY]))
+        await cg.register_component(btn, config)
+
+    # Extended protocol: status report button
+    if CONF_STATUS_REPORT_BUTTON in config:
+        btn_conf = config[CONF_STATUS_REPORT_BUTTON]
+        btn = await button.new_button(btn_conf)
+        cg.add(btn.set_parent(var))
         await cg.register_component(btn, config)
 
     # Extended protocol: diagnostic mode

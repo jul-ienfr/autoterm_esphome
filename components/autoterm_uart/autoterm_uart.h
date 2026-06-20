@@ -196,6 +196,15 @@ class AutotermPrimePumpButton : public button::Button {
   void press_action() override;
 };
 
+// Status Report Button: requests all diagnostic data and formats into text sensor
+class AutotermStatusReportButton : public button::Button {
+ public:
+  AutotermUART *parent_{nullptr};
+  void set_parent(AutotermUART *p) { parent_ = p; }
+ protected:
+  void press_action() override;
+};
+
 // ===================
 // Main class UART
 // ===================
@@ -432,6 +441,11 @@ class AutotermUART : public Component {
   // Safety: startup voltage check
   bool startup_voltage_ok_{true};
 
+  // Burn-out protection: prevent shutdown during first 4 minutes after ignition
+  bool burnout_protection_active_{false};
+  uint32_t burnout_start_ms_{0};
+  static constexpr uint32_t BURNOUT_PROTECTION_MS = 240000;  // 4 minutes
+
   // Safety: flameout confirmation counter (requires 2 consecutive low-temp readings)
   uint8_t flameout_confirm_count_{0};
 
@@ -623,7 +637,8 @@ class AutotermUART : public Component {
     check_uart_loss_(now);
 
     // Safety checks (run on every loop)
-    if (heater_running_ && !emergency_shutdown_active_) {
+    // Burn-out protection suppresses flameout check during first 4 min
+    if (heater_running_ && !emergency_shutdown_active_ && !burnout_protection_active_) {
       check_flameout_(last_heater_temp_c_, last_pump_freq_c_, now);
     }
 
@@ -1089,6 +1104,29 @@ void AutotermPrimePumpButton::press_action() {
   }
 }
 
+void AutotermStatusReportButton::press_action() {
+  if (!parent_) return;
+  ESP_LOGI("autoterm_uart", "Button: Status Report requested");
+  // Request all diagnostic data
+  parent_->send_version_request_();
+  parent_->send_report_request_();
+  parent_->send_status_request_();
+  parent_->send_diagnostic_mode_(true);
+  // Build status report text
+  static char report_buf[256];
+  snprintf(report_buf, sizeof(report_buf),
+           "Firmware: %s | Runtime: %.1fh | Fuel: %.2fL | Starts: %u | Error: %u (%s) | Uptime: %lus",
+           parent_->firmware_version_sensor_ ? parent_->firmware_version_sensor_->state.c_str() : "?",
+           parent_->runtime_hours_,
+           parent_->total_fuel_liters_,
+           parent_->history_total_starts_,
+           parent_->last_error_code_,
+           parent_->error_code_to_text_(parent_->last_error_code_),
+           millis() / 1000);
+  if (parent_->error_log_sensor_) parent_->error_log_sensor_->publish_state(report_buf);
+  ESP_LOGI("autoterm_uart", "Status Report: %s", report_buf);
+}
+
 void AutotermUART::set_runtime_hours_sensor(Sensor *s) {
   runtime_hours_sensor_ = s;
   if (runtime_hours_sensor_ != nullptr && runtime_loaded_)
@@ -1441,6 +1479,19 @@ void AutotermUART::track_ignition_time_(uint16_t status_code, uint32_t now) {
     ignition_start_ms_ = now;
     ignition_tracking_active_ = true;
     ESP_LOGD("autoterm_uart", "Ignition tracking started");
+  }
+
+  // Activate burn-out protection when heating starts
+  if (is_heating && !burnout_protection_active_) {
+    burnout_protection_active_ = true;
+    burnout_start_ms_ = now;
+    ESP_LOGI("autoterm_uart", "Burn-out protection: active for 4 minutes");
+  }
+
+  // Deactivate burn-out protection after 4 minutes
+  if (burnout_protection_active_ && (now - burnout_start_ms_) > BURNOUT_PROTECTION_MS) {
+    burnout_protection_active_ = false;
+    ESP_LOGI("autoterm_uart", "Burn-out protection: expired (4 minutes elapsed)");
   }
 
   // Stop tracking when heating begins or ignition ends
@@ -2031,12 +2082,24 @@ void AutotermUART::check_emergency_recovery_(uint32_t now) {
 
 void AutotermUART::check_emergency_shutdown_(float heater_temp, float voltage, uint16_t status_code) {
   // 1. Over-temperature protection (immediate, no confirmation needed)
+  // ALWAYS active, even during burn-out protection
   if (std::isfinite(heater_temp) && heater_temp > SAFETY_MAX_HEATER_TEMP_C) {
     emergency_stop_("Heater temperature critical");
     return;
   }
 
-  // 2. Critical low voltage during operation (requires 2 consecutive readings)
+  // 2. During burn-out protection (first 4 min after ignition), only critical over-temp triggers shutdown
+  // Voltage dips and flameout are suppressed to prevent damage from incomplete combustion
+  if (burnout_protection_active_) {
+    static uint32_t last_burnout_log = 0;
+    if ((millis() - last_burnout_log) > 60000) {
+      last_burnout_log = millis();
+      ESP_LOGD("autoterm_uart", "Burn-out protection: suppressing non-critical shutdown");
+    }
+    return;
+  }
+
+  // 3. Critical low voltage during operation (requires 2 consecutive readings)
   // Transient voltage dips during glow plug startup are normal
   if (std::isfinite(voltage) && voltage < 9.0f && is_heater_active_status_(status_code)) {
     voltage_dip_confirm_count_++;

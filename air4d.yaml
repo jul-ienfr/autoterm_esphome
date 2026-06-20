@@ -523,6 +523,11 @@ autoterm_uart:
     icon: "mdi:water-pump"
     prime_frequency: 1  # Hz (1-255)
 
+  # Bouton snapshot complet (demande version + historique + status + diagnostic)
+  status_report_button:
+    name: "Status Report"
+    icon: "mdi:file-document-edit"
+
 # Automatisations utiles
 # Exemple: Notification si erreur CRC élevée
 text_sensor:
