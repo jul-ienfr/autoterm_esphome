@@ -1,0 +1,17 @@
+# Gitignore settings for ESPHome
+/.esphome/
+**/.esphome/
+**/secrets.yaml
+**/__pycache__/
+*.pyc
+
+# Binaries
+*.ota.bin
+*.bin
+
+# IDE
+.vscode/
+**/.vscode/
+
+# Build artifacts
+**/build/
