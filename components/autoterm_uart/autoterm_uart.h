@@ -337,6 +337,12 @@ class AutotermUART : public Component {
   ESPPreferenceObject fuel_pref_;
   bool fuel_dirty_{false};
 
+  // Daily fuel tracking (resets at midnight)
+  float daily_fuel_liters_{0.0f};
+  float daily_fuel_last_published_{NAN};
+  int last_fuel_reset_day_{-1};
+  Sensor *daily_fuel_sensor_{nullptr};
+
   // Combustion efficiency tracking
   Sensor *combustion_efficiency_sensor_{nullptr};
   Sensor *delta_t_sensor_{nullptr};
@@ -524,6 +530,7 @@ class AutotermUART : public Component {
   void set_temp_source_select(AutotermTempSourceSelect *select);
   void set_fuel_consumption_sensor(Sensor *s) { fuel_consumption_sensor_ = s; }
   void set_total_fuel_sensor(Sensor *s) { total_fuel_sensor_ = s; }
+  void set_daily_fuel_sensor(Sensor *s) { daily_fuel_sensor_ = s; }
   void set_combustion_efficiency_sensor(Sensor *s) { combustion_efficiency_sensor_ = s; }
   void set_delta_t_sensor(Sensor *s) { delta_t_sensor_ = s; }
   void set_ignition_time_sensor(Sensor *s) { ignition_time_sensor_ = s; }
@@ -1409,10 +1416,23 @@ void AutotermUART::update_fuel_consumption_(float pump_freq) {
   // Autoterm pumps are typically 2-6 Hz, with ~0.085 L/h per Hz
   fuel_consumption_lph_ = pump_freq * FUEL_LITERS_PER_HZ;
 
-  // Accumulate total fuel consumed (convert L/h to L per loop cycle ~2s)
+  // Accumulate fuel consumed (convert L/h to L per loop cycle ~2s)
   if (heater_running_ && pump_freq > 0) {
-    total_fuel_liters_ += fuel_consumption_lph_ * (2.0f / 3600.0f);
+    float consumed = fuel_consumption_lph_ * (2.0f / 3600.0f);
+    total_fuel_liters_ += consumed;
+    daily_fuel_liters_ += consumed;
     fuel_dirty_ = true;
+  }
+
+  // Daily reset at midnight
+  struct tm timeinfo;
+  if (now_local(&timeinfo)) {
+    int today = timeinfo.tm_mday;
+    if (last_fuel_reset_day_ >= 0 && today != last_fuel_reset_day_) {
+      ESP_LOGI("autoterm_uart", "Daily fuel reset: yesterday=%.2fL", daily_fuel_liters_);
+      daily_fuel_liters_ = 0.0f;
+    }
+    last_fuel_reset_day_ = today;
   }
 }
 
@@ -1458,6 +1478,21 @@ void AutotermUART::publish_total_fuel_(bool force) {
   if (should_publish) {
     total_fuel_sensor_->publish_state(total_fuel_liters_);
     total_fuel_last_published_ = total_fuel_liters_;
+  }
+
+  // Publish daily fuel
+  if (daily_fuel_sensor_) {
+    bool should_publish_daily = force;
+    if (!should_publish_daily) {
+      if (std::isnan(daily_fuel_last_published_) ||
+          std::fabs(daily_fuel_liters_ - daily_fuel_last_published_) >= 0.01f) {
+        should_publish_daily = true;
+      }
+    }
+    if (should_publish_daily) {
+      daily_fuel_sensor_->publish_state(daily_fuel_liters_);
+      daily_fuel_last_published_ = daily_fuel_liters_;
+    }
   }
 }
 
@@ -2044,15 +2079,54 @@ void AutotermUART::evaluate_frost_protection_() {
   float ext_temp = last_external_temp_c_;
   if (!std::isfinite(ext_temp)) return;
 
-  // === Standard frost protection: start if external temp is too low ===
-  if (ext_temp < frost_protection_temp_c_ && ext_temp > -40.0f) {
-    ESP_LOGW("autoterm_uart", "Frost protection: external temp %.1f°C < %.1f°C, starting heater",
-             ext_temp, frost_protection_temp_c_);
-    // Start in power mode at lowest level
-    send_power_mode(true, 1);
-    frost_protection_active_ = false;  // One-shot: don't restart continuously
+  // === Antifreeze zones with asymmetric hysteresis (from zatakon/esphome-vevor-heater) ===
+  // 4 power zones based on external temperature:
+  //   Zone 1: ext > 5°C     → OFF (no heating)
+  //   Zone 2: 0°C < ext ≤ 5°C  → Level 1-2 (minimal)
+  //   Zone 3: -5°C < ext ≤ 0°C → Level 3-5 (moderate)
+  //   Zone 4: ext ≤ -5°C    → Level 6-9 (aggressive)
+  //
+  // Asymmetric hysteresis: power increases delayed by 0.4°C, decreases immediate
+
+  uint8_t target_level = 0;
+
+  if (ext_temp > 5.0f) {
+    target_level = 0;  // Zone 1: OFF
+  } else if (ext_temp > 0.0f) {
+    target_level = std::max(static_cast<uint8_t>(1),
+                            static_cast<uint8_t>((5.0f - ext_temp) / 5.0f * 2.0f + 1.0f));  // 1-2
+  } else if (ext_temp > -5.0f) {
+    target_level = std::max(static_cast<uint8_t>(3),
+                            static_cast<uint8_t>((0.0f - ext_temp) / 5.0f * 2.0f + 3.0f));  // 3-5
+  } else {
+    target_level = std::max(static_cast<uint8_t>(6),
+                            static_cast<uint8_t>((-5.0f - ext_temp) / 10.0f * 3.0f + 6.0f));  // 6-9
+  }
+  target_level = std::min(target_level, static_cast<uint8_t>(9));
+
+  if (target_level == 0) {
+    // Temperature is warm enough — don't start
     return;
   }
+
+  // Asymmetric hysteresis: delay power increases by 0.4°C, decreases are immediate
+  static uint8_t last_frost_level = 0;
+  static uint32_t last_frost_increase_ms = 0;
+
+  if (target_level > last_frost_level) {
+    // Power increase — check if we should delay
+    uint32_t now = millis();
+    if (last_frost_increase_ms > 0 && (now - last_frost_increase_ms) < 400) {
+      return;  // Delay increase by 0.4 seconds (scaled from 0.4°C concept)
+    }
+    last_frost_increase_ms = now;
+  }
+
+  last_frost_level = target_level;
+  ESP_LOGW("autoterm_uart", "Frost protection: ext=%.1f°C → zone level %u", ext_temp, target_level);
+  send_power_mode(true, target_level);
+  frost_protection_active_ = false;  // One-shot
+}
 
   // === Prediction-based pre-heating: start early at low power if temp will drop ===
   if (!prediction_active_ || !prediction_initialized_) return;

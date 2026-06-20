@@ -126,6 +126,12 @@ CONFIG_SCHEMA = cv.Schema({
         state_class=const.STATE_CLASS_TOTAL_INCREASING,
         device_class=const.DEVICE_CLASS_GAS,
     ),
+    cv.Optional("daily_fuel_consumed"): sensor.sensor_schema(
+        unit_of_measurement="L",
+        icon="mdi:gas-station",
+        accuracy_decimals=2,
+        state_class=const.STATE_CLASS_MEASUREMENT,
+    ),
     cv.Optional("combustion_efficiency"): sensor.sensor_schema(
         unit_of_measurement="%",
         icon="mdi:fire",
@@ -344,6 +350,7 @@ async def to_code(config):
         ("session_runtime", "set_session_runtime_sensor"),
         (CONF_FUEL_CONSUMPTION, "set_fuel_consumption_sensor"),
         ("total_fuel_consumed", "set_total_fuel_sensor"),
+        ("daily_fuel_consumed", "set_daily_fuel_sensor"),
         ("combustion_efficiency", "set_combustion_efficiency_sensor"),
         ("delta_t", "set_delta_t_sensor"),
         ("ignition_time", "set_ignition_time_sensor"),

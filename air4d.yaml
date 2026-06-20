@@ -279,6 +279,14 @@ autoterm_uart:
     device_class: gas
     icon: "mdi:gas-station-outline"
 
+  # Consommation carburant du jour (reset à minuit)
+  daily_fuel_consumed:
+    name: "Daily Fuel Consumed"
+    unit_of_measurement: "L"
+    accuracy_decimals: 2
+    state_class: measurement
+    icon: "mdi:gas-station"
+
   # Efficacité combustion (estimation en %)
   combustion_efficiency:
     name: "Combustion Efficiency"
