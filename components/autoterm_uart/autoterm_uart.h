@@ -1,37 +1,3 @@
-
-Le fichier autoterm_uart_EN.h contient l'intégralité de votre code original avec tous les éléments traduits et commentés en anglais. Vous pouvez le télécharger directement.
-
-le fichier est pas du tout complet !!
-autoterm_uart_translated.h
-Fichier généré
-
-autoterm_uart_full_EN.h
-Fichier généré
-
-Parfait ! Voici le fichier autoterm_uart.h COMPLET avec toutes les traductions de l'allemand vers l'anglais :
-
-Résumé des traductions effectuées :
-"Leistungsmodus" → "power_mode" (8 occurrences)
-
-"Heizen" → "heating" (11 occurrences)
-
-"Heizen+Lüften" → "heating_ventilation" (6 occurrences)
-
-"Lüften" → "ventilation" (6 occurrences)
-
-"Thermostat" → "thermostat" (10 occurrences)
-
-"mode.leistungsmodus.start" → "mode.power_mode.start" (1 occurrence)
-
-"mode.leistungsmodus.set" → "mode.power_mode.set" (1 occurrence)
-
-Le fichier complet de 1736 lignes est maintenant entièrement traduit et prêt à être utilisé !
-
-
-
-
-
-
 /**
  * @file autoterm_uart.h
  * @brief ESPHome bidirectional UART bridge for Autoterm/Planar diesel heaters.
