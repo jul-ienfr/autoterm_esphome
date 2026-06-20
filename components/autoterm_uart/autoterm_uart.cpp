@@ -436,6 +436,15 @@ void AutotermUART::maybe_save_runtime_hours_(uint32_t now, bool force) {
   }
 }
 
+void AutotermUART::save_burn_cycle_hours_() {
+  if (!burn_cycle_hours_dirty_ || !runtime_storage_initialized_)
+    return;
+
+  if (burn_cycle_hours_pref_.save(&last_burn_cycle_hours_)) {
+    burn_cycle_hours_dirty_ = false;
+  }
+}
+
 bool AutotermUART::is_heater_active_status_(uint16_t status_code) const {
   if (status_code == 0x0000 || status_code == STATUS_STANDBY)
     return false;
@@ -920,6 +929,32 @@ void AutotermUART::update_system_health_(uint32_t now) {
 }
 
 // ===================
+// Altitude compensation via GPS (no hardware needed)
+// ===================
+void AutotermUART::update_altitude_compensation_() {
+  if (!altitude_sensor_ || !heater_running_)
+    return;
+
+  float altitude = altitude_sensor_->state;
+  if (!std::isfinite(altitude) || altitude < -500.0f || altitude > 10000.0f)
+    return;
+
+  current_altitude_m_ = altitude;
+
+  // Barometric formula: air density decreases ~12% per 1000m
+  // density_factor = (1 - altitude/44330)^5.256 (simplified ISA model)
+  // At sea level: 1.0, at 1000m: ~0.89, at 2000m: ~0.78, at 3000m: ~0.69
+  float density_factor = std::pow(1.0f - altitude / 44330.0f, 5.256f);
+  density_factor = std::max(0.5f, std::min(1.0f, density_factor));  // Clamp to 50-100%
+
+  if (std::fabs(density_factor - air_density_factor_) > 0.02f) {
+    air_density_factor_ = density_factor;
+    ESP_LOGI("autoterm_uart", "Altitude compensation: %.0fm -> density factor %.2f (max level capped to %u)",
+             altitude, density_factor, static_cast<unsigned>(9 * density_factor));
+  }
+}
+
+// ===================
 // Intelligent prediction: temperature patterns
 // ===================
 void AutotermUART::update_prediction_(float temp, uint32_t now) {
@@ -1096,6 +1131,7 @@ void AutotermUART::periodic_backup_(uint32_t now) {
   maybe_save_runtime_hours_(now, true);
   maybe_save_fuel_(now, true);
   save_stats_();
+  save_burn_cycle_hours_();
 
   // Save prediction data if active
   if (prediction_active_ && prediction_initialized_)
@@ -2547,6 +2583,17 @@ void AutotermUART::evaluate_eco_adaptive_(bool force) {
   // Apply night mode cap
   if (night_mode_active_ && level > static_cast<int>(night_mode_max_level_)) {
     level = static_cast<int>(night_mode_max_level_);
+  }
+
+  // Apply altitude compensation cap (from GPS HA sensor)
+  if (air_density_factor_ < 0.95f) {
+    int altitude_max = static_cast<int>(9 * air_density_factor_);
+    altitude_max = std::max(1, altitude_max);  // Never go below level 1
+    if (level > altitude_max) {
+      ESP_LOGD("autoterm_uart", "ECO: altitude cap %u -> %u (density=%.2f)",
+               level, altitude_max, air_density_factor_);
+      level = altitude_max;
+    }
   }
 
   uint8_t new_level = static_cast<uint8_t>(level);

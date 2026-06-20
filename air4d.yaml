@@ -545,6 +545,13 @@ autoterm_uart:
   #   name: "CO Level"
   #   device_class: carbon_monoxide
 
+  # GPS altitude (depuis HA Companion App — pas de hardware nécessaire)
+  # Compense automatiquement la densité de l'air en altitude
+  # À 2000m: max level réduit de 9 à 7 (évite suie et combustion riche)
+  # ⚠️ Nécessite HA Companion App avec GPS activé sur le téléphone
+  # gps_altitude:
+  #   name: "GPS Altitude"
+
 # Automatisations utiles
 # Exemple: Notification si erreur CRC élevée
 text_sensor:

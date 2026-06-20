@@ -45,6 +45,7 @@ CONF_PID_KD = "pid_kd"
 CONF_MAINTENANCE_OIL_HRS = "maintenance_oil_hours"
 CONF_MAINTENANCE_FILTER_HRS = "maintenance_filter_hours"
 CONF_MAINTENANCE_GLOW_HRS = "maintenance_glow_hours"
+CONF_BURN_CYCLE_INTERVAL_HRS = "burn_cycle_interval_hours"
 CONF_FUEL_ECONOMY = "fuel_economy"
 CONF_FUEL_ECONOMY_REACTIVE = "fuel_economy_reactive"
 CONF_PREDICTION = "prediction"
@@ -236,6 +237,7 @@ CONFIG_SCHEMA = cv.Schema({
     cv.Optional(CONF_MAINTENANCE_OIL_HRS, default=500.0): cv.float_range(min=50.0, max=2000.0),
     cv.Optional(CONF_MAINTENANCE_FILTER_HRS, default=200.0): cv.float_range(min=50.0, max=1000.0),
     cv.Optional(CONF_MAINTENANCE_GLOW_HRS, default=1000.0): cv.float_range(min=100.0, max=3000.0),
+    cv.Optional(CONF_BURN_CYCLE_INTERVAL_HRS, default=100.0): cv.float_range(min=10.0, max=500.0),
 
     # Fuel economy mode
     cv.Optional(CONF_FUEL_ECONOMY, default=False): cv.boolean,
@@ -294,6 +296,14 @@ CONFIG_SCHEMA = cv.Schema({
         accuracy_decimals=0,
         state_class=const.STATE_CLASS_MEASUREMENT,
         device_class=const.DEVICE_CLASS_CARBON_MONOXIDE,
+    ),
+
+    # GPS altitude (from HA Companion App — no hardware needed)
+    cv.Optional("gps_altitude"): sensor.sensor_schema(
+        unit_of_measurement="m",
+        icon="mdi:map-marker海拔",
+        accuracy_decimals=0,
+        state_class=const.STATE_CLASS_MEASUREMENT,
     ),
 
     # Extended protocol: error/history sensors
@@ -447,6 +457,8 @@ async def to_code(config):
         cg.add(var.set_maintenance_filter_hrs(config[CONF_MAINTENANCE_FILTER_HRS]))
     if CONF_MAINTENANCE_GLOW_HRS in config:
         cg.add(var.set_maintenance_glow_hrs(config[CONF_MAINTENANCE_GLOW_HRS]))
+    if CONF_BURN_CYCLE_INTERVAL_HRS in config:
+        cg.add(var.set_burn_cycle_interval_hours(config[CONF_BURN_CYCLE_INTERVAL_HRS]))
 
     # Fuel economy mode
     if CONF_FUEL_ECONOMY in config:
@@ -470,6 +482,7 @@ async def to_code(config):
         (CONF_ERROR_CODE, "set_error_code_sensor"),
         (CONF_TOTAL_STARTS, "set_total_starts_sensor"),
         ("co_level", "set_co_sensor"),
+        ("gps_altitude", "set_altitude_sensor"),
     ]:
         if key in config:
             sens = await sensor.new_sensor(config[key])

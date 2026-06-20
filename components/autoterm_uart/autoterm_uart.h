@@ -93,6 +93,9 @@ static constexpr float MAINTENANCE_OIL_HOURS = 500.0f;
 static constexpr float MAINTENANCE_FILTER_HOURS = 200.0f;
 static constexpr float MAINTENANCE_GLOW_HOURS = 1000.0f;
 
+// Burn cycle interval (hours of combustion between carbon cleaning runs)
+static constexpr float BURN_CYCLE_INTERVAL_HOURS_DEFAULT = 100.0f;
+
 // Frost protection threshold
 static constexpr float FROST_PROTECTION_TEMP_C = 2.0f;
 
@@ -387,6 +390,10 @@ class AutotermUART : public Component {
   float maintenance_oil_hrs_{MAINTENANCE_OIL_HOURS};
   float maintenance_filter_hrs_{MAINTENANCE_FILTER_HOURS};
   float maintenance_glow_hrs_{MAINTENANCE_GLOW_HOURS};
+  float burn_cycle_interval_hours_{BURN_CYCLE_INTERVAL_HOURS_DEFAULT};
+  float last_burn_cycle_hours_{0.0f};
+  ESPPreferenceObject burn_cycle_hours_pref_;
+  bool burn_cycle_hours_dirty_{false};
 
   // Intelligent prediction: temperature patterns by hour of day
   bool prediction_active_{false};
@@ -424,6 +431,12 @@ class AutotermUART : public Component {
   sensor::Sensor *eco_adaptive_error_sensor_{nullptr};
   sensor::Sensor *eco_power_efficiency_sensor_{nullptr};
   text_sensor::TextSensor *eco_mode_status_sensor_{nullptr};
+
+  // Altitude compensation via GPS HA (no hardware needed)
+  sensor::Sensor *altitude_sensor_{nullptr};  // From HA: sensor.gps_altitude
+  float current_altitude_m_{0.0f};
+  float air_density_factor_{1.0f};  // 1.0 at sea level, ~0.78 at 2000m
+  static constexpr float SEA_LEVEL_PRESSURE_PA = 101325.0f;
 
   // PID output smoothing (circular buffer of last 3 outputs)
   float pid_output_history_[3] = {0.0f, 0.0f, 0.0f};
@@ -538,6 +551,7 @@ class AutotermUART : public Component {
   void set_ignition_time_sensor(sensor::Sensor *s) { ignition_time_sensor_ = s; }
   void set_co_sensor(sensor::Sensor *s) { co_sensor_ = s; }
   void set_max_pump_freq(float hz) { max_pump_freq_hz_ = hz; }
+  void set_altitude_sensor(sensor::Sensor *s) { altitude_sensor_ = s; }
   void set_boot_count_sensor(sensor::Sensor *s) { boot_count_sensor_ = s; }
   void set_free_heap_sensor(sensor::Sensor *s) { free_heap_sensor_ = s; }
   void set_reset_reason_sensor(text_sensor::TextSensor *s) { reset_reason_sensor_ = s; }
@@ -546,6 +560,7 @@ class AutotermUART : public Component {
   void set_maintenance_oil_hrs(float hrs) { maintenance_oil_hrs_ = hrs; }
   void set_maintenance_filter_hrs(float hrs) { maintenance_filter_hrs_ = hrs; }
   void set_maintenance_glow_hrs(float hrs) { maintenance_glow_hrs_ = hrs; }
+  void set_burn_cycle_interval_hours(float hrs) { burn_cycle_interval_hours_ = hrs; }
   // Extended protocol sensor setters
   void set_glow_plug_current_sensor(sensor::Sensor *s) { glow_plug_current_sensor_ = s; }
   void set_chamber_temp_sensor(sensor::Sensor *s) { chamber_temp_sensor_ = s; }
@@ -713,6 +728,13 @@ class AutotermUART : public Component {
     // System health monitoring (every 60s)
     update_system_health_(now);
 
+    // Altitude compensation from GPS HA sensor (every 60s)
+    static uint32_t last_altitude_update = 0;
+    if ((now - last_altitude_update) > 60000) {
+      update_altitude_compensation_();
+      last_altitude_update = now;
+    }
+
     // Active fuel economy: reduce power when near target
     evaluate_fuel_economy_reactive_(now);
 
@@ -728,14 +750,16 @@ class AutotermUART : public Component {
       publish_system_health_();
     }
 
-    // Burn cycle: periodic high-power run to clean carbon (every 7 days, 15 min at level 8)
-    // Only runs when heater is idle and frost protection is off
-    static uint32_t last_burn_cycle_ms = 0;
+    // Burn cycle: periodic high-power run to clean carbon (configurable interval, 15 min at level 8)
+    // Triggered by hours of combustion, not calendar time — carbon buildup depends on runtime
     if (!heater_running_ && !frost_protection_active_ && !emergency_shutdown_active_ &&
-        runtime_hours_ > 10.0f && (now - last_burn_cycle_ms) > 604800000) {  // 7 days
-      ESP_LOGI("autoterm_uart", "Burn cycle: starting 15-min high-power run to clean carbon");
+        runtime_hours_ > 10.0f &&
+        (runtime_hours_ - last_burn_cycle_hours_) >= burn_cycle_interval_hours_) {
+      ESP_LOGI("autoterm_uart", "Burn cycle: starting 15-min high-power run to clean carbon (after %.1fh of operation)",
+               runtime_hours_ - last_burn_cycle_hours_);
       send_power_mode(true, 8);
-      last_burn_cycle_ms = now;
+      last_burn_cycle_hours_ = runtime_hours_;
+      burn_cycle_hours_dirty_ = true;
       // Auto-shutdown after 15 minutes (900000ms) is handled by the heater's own work_time
     }
 
@@ -760,9 +784,16 @@ class AutotermUART : public Component {
       if (!runtime_hours_pref_.load(&runtime_hours_)) {
         runtime_hours_ = 0.0f;
       }
+      // Burn cycle: persist last trigger time to avoid re-trigger after reboot
+      burn_cycle_hours_pref_ =
+          global_preferences->make_preference<float>(fnv1_hash("autoterm_uart_burn_cycle_hrs"));
+      if (!burn_cycle_hours_pref_.load(&last_burn_cycle_hours_)) {
+        last_burn_cycle_hours_ = 0.0f;
+      }
     } else {
       runtime_storage_initialized_ = false;
       runtime_hours_ = 0.0f;
+      last_burn_cycle_hours_ = 0.0f;
     }
     runtime_loaded_ = true;
     runtime_hours_last_published_ = NAN;
@@ -839,6 +870,7 @@ public:
   void evaluate_thermostat_control_(bool force = false);
   void evaluate_eco_adaptive_(bool force = false);
   void update_system_health_(uint32_t now);
+  void update_altitude_compensation_();
   void handle_thermostat_status_update_(uint16_t status_code);
   void send_thermostat_cooldown_(uint8_t source, uint8_t temp_byte);
   float clamp_thermostat_target_(float target) const;
@@ -854,6 +886,7 @@ public:
   void publish_runtime_hours_(bool force = false);
   void publish_session_runtime_(bool force = false);
   void maybe_save_runtime_hours_(uint32_t now, bool force = false);
+  void save_burn_cycle_hours_();
   bool is_heater_active_status_(uint16_t status_code) const;
 
   // New: Reliability
