@@ -135,6 +135,18 @@ Module la puissance (niveaux 1-9) proportionnellement à l'erreur de températur
 | `chamber_temp` | °C | T° chambre combustion (diagnostic) |
 | `board_temp` | °C | T° carte ECU (diagnostic) |
 
+### Capteurs optionnels (hardware externe)
+
+> ⚠️ **Le chauffage Autoterm a déjà des capteurs intégrés** (T° échappement, interne, externe, chambre combustion, tension, ventilateur, pompe) qui remontent via le protocole UART. Les capteurs ci-dessous sont un **PLUS** pour améliorer le système, pas une nécessité.
+
+| Capteur | Prix | Hardware nécessaire | Quand activer |
+|---------|------|---------------------|---------------|
+| **CO Level** (🔴 sécurité) | ~3€ | MQ-7 sur GPIO34 | **Recommandé** — détecte fuites monoxyde de carbone |
+| **GPS Altitude** | 0€ | HA Companion App avec GPS | En altitude > 1000m (compensation auto) |
+| **Exhaust Temp Direct** | ~5€ | Thermocouple K + MAX6675 sur SPI | Plus de précision que la T° UART |
+
+**Tous fonctionnent SANS hardware** — le système se dégrade gracieusement si le capteur n'est pas là.
+
 ---
 
 ## 🟢 Modes

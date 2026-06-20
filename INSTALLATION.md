@@ -15,7 +15,19 @@ Guide pas-à-pas pour installer et configurer le pont UART Autoterm avec ESPHome
 | Alimentation 12V→5V buck converter | 1 | ~3€ | AliExpress |
 | Boîtier 3D (optionnel) | 1 | ~5€ | Thingiverse |
 
-**Total: ~15-20€**
+**Total de base: ~15-20€**
+
+### Capteurs optionnels (recommandés)
+
+> ⚠️ **Le chauffage Autoterm a déjà des capteurs intégrés** (T° échappement, interne, externe, chambre combustion, tension, ventilateur, pompe). Ces capteurs optionnels améliorent le système mais ne sont pas nécessaires.
+
+| Composant | Prix | Utilité | Priorité |
+|-----------|------|---------|----------|
+| **MQ-7 CO sensor** (🔴 sécurité) | ~3€ | Détecte fuites monoxyde de carbone | **Recommandé** |
+| **HA Companion App** (GPS) | 0€ | Compensation altitude automatique | Si altitude > 1000m |
+| **Thermocouple K + MAX6675** | ~5€ | T° échappement plus précise | Optionnel |
+
+**Total avec CO sensor: ~18-23€**
 
 ---
 

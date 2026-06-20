@@ -175,6 +175,48 @@ void loop() {
 
 ---
 
+## Capteurs optionnels (recommandés)
+
+### MQ-7 — Détecteur CO (🔴 sécurité)
+
+> **Recommandé** — détecte les fuites de monoxyde de carbone dues à un échangeur fissuré.
+
+```
+MQ-7 VCC → 5V ESP32
+MQ-7 GND → GND ESP32
+MQ-7 AOUT → GPIO34 (ADC)
+```
+
+- Module PCB MQ-7 (~3€) : gère automatiquement le cycle de chauffe
+- Seuil d'urgence : > 35 ppm → arrêt automatique
+- **SANS ce capteur, le système fonctionne parfaitement** — il améliore la sécurité
+
+### Thermocouple K — T° échappement direct (optionnel)
+
+> Le chauffage Autoterm a **déjà** un capteur T° échappement intégré (via UART). Cette sonde est un PLUS pour plus de précision.
+
+```
+MAX6675 VCC → 3.3V ESP32
+MAX6675 GND → GND ESP32
+MAX6675 CLK → GPIO18 (SPI CLK)
+MAX6675 CS  → GPIO5  (SPI CS)
+MAX6675 DO  → GPIO19 (SPI MISO)
+```
+
+- Thermocouple K + module MAX6675 (~5€)
+- Montage : boulon M10 dans l'échappement ou soudure
+- **SANS cette sonde, le système utilise la T° UART** — fonctionne parfaitement
+
+### GPS Altitude (via Home Assistant)
+
+> **Aucun hardware nécessaire** — utilise le GPS du téléphone via HA Companion App.
+
+- Activer le GPS dans HA Companion App sur votre téléphone
+- Le capteur `sensor.gps_altitude` est automatiquement disponible
+- Le système compense la densité de l'air en altitude (réduit le niveau max)
+
+---
+
 ## Résolution de problèmes
 
 | Symptôme | Cause possible | Solution |
