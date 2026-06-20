@@ -515,13 +515,18 @@ void AutotermUART::update_fuel_consumption_(float pump_freq) {
   // Autoterm pumps are typically 2-6 Hz, with ~0.085 L/h per Hz
   fuel_consumption_lph_ = pump_freq * FUEL_LITERS_PER_HZ;
 
-  // Accumulate fuel consumed (convert L/h to L per loop cycle ~2s)
-  if (heater_running_ && pump_freq > 0) {
-    float consumed = fuel_consumption_lph_ * (2.0f / 3600.0f);
-    total_fuel_liters_ += consumed;
-    daily_fuel_liters_ += consumed;
-    fuel_dirty_ = true;
+  // Accumulate fuel consumed using ACTUAL elapsed time (not hardcoded interval)
+  uint32_t now = millis();
+  if (heater_running_ && pump_freq > 0 && last_fuel_update_ms_ > 0) {
+    float elapsed_s = static_cast<float>(now - last_fuel_update_ms_) / 1000.0f;
+    if (elapsed_s > 0.0f && elapsed_s < 30.0f) {  // Sanity check: max 30s between updates
+      float consumed = fuel_consumption_lph_ * (elapsed_s / 3600.0f);
+      total_fuel_liters_ += consumed;
+      daily_fuel_liters_ += consumed;
+      fuel_dirty_ = true;
+    }
   }
+  last_fuel_update_ms_ = now;
 
   // Daily reset at midnight
   struct tm timeinfo;
@@ -1224,7 +1229,8 @@ void AutotermUART::evaluate_frost_protection_() {
   last_frost_level = target_level;
   ESP_LOGW("autoterm_uart", "Frost protection: ext=%.1f°C -> zone level %u", ext_temp, target_level);
   send_power_mode(true, target_level);
-  frost_protection_active_ = false;  // One-shot
+  // Do NOT set frost_protection_active_ = false — keep monitoring continuously
+  // If heater shuts down later, frost protection will re-engage on next 30s check
 
   // === Prediction-based pre-heating: start early at low power if temp will drop ===
   if (!prediction_active_ || !prediction_initialized_) return;
@@ -1428,6 +1434,28 @@ void AutotermUART::process_frame_(std::vector<uint8_t> frame, uart::UARTComponen
   bool valid = validate_crc(frame);
   std::vector<uint8_t> outgoing = frame;
 
+  // Track CRC errors with rate monitoring and resync
+  frame_count_++;
+
+  if (!valid) {
+    crc_error_count_++;
+    float error_rate = static_cast<float>(crc_error_count_) / frame_count_ * 100.0f;
+
+    ESP_LOGW("autoterm_uart", "[%s] CRC error (total: %u/%u = %.2f%%) — frame discarded",
+             tag, crc_error_count_, frame_count_, error_rate);
+
+    // Alert if error rate > 5%
+    if (error_rate > 5.0f && frame_count_ > 100) {
+      ESP_LOGE("autoterm_uart", "CRC error rate critical: %.2f%% - check UART connections!", error_rate);
+    }
+
+    // Do NOT forward invalid frames — heater/display will handle missing frame via timeout
+    auto &buffer = from_display ? display_to_heater_buffer_ : heater_to_display_buffer_;
+    resync_uart_buffer_(buffer);
+    return;
+  }
+
+  // === Only forward VALID frames ===
   if (valid && from_display) {
     if (is_panel_temperature_frame_(outgoing) && should_override_panel_temperature_()) {
       if (outgoing.size() > 5) {
@@ -1449,27 +1477,6 @@ void AutotermUART::process_frame_(std::vector<uint8_t> frame, uart::UARTComponen
   if (dst != nullptr && !outgoing.empty()) {
     dst->write_array(outgoing.data(), outgoing.size());
     dst->flush();
-  }
-
-  // Track CRC errors with rate monitoring and resync
-  frame_count_++;
-
-  if (!valid) {
-    crc_error_count_++;
-    float error_rate = static_cast<float>(crc_error_count_) / frame_count_ * 100.0f;
-
-    ESP_LOGW("autoterm_uart", "[%s] CRC error (total: %u/%u = %.2f%%)",
-             tag, crc_error_count_, frame_count_, error_rate);
-
-    // Alert if error rate > 5%
-    if (error_rate > 5.0f && frame_count_ > 100) {
-      ESP_LOGE("autoterm_uart", "CRC error rate critical: %.2f%% - check UART connections!", error_rate);
-    }
-
-    // Try to resync on CRC error
-    auto &buffer = from_display ? display_to_heater_buffer_ : heater_to_display_buffer_;
-    resync_uart_buffer_(buffer);
-    return;
   }
 
   if (is_panel_temperature_frame_(outgoing))

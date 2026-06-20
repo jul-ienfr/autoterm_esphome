@@ -14,7 +14,7 @@ esp32:
       CONFIG_ESP32_DEFAULT_CPU_FREQ_160: y  # 160MHz suffisant pour UART 9600 baud (économie ~20-30mA)
       # Automatic power management: CPU light-sleep when idle (économie ~50-80mA en veille)
       CONFIG_PM_ENABLE: y
-      CONFIG_PM_DFS_INIT_FREQ: 80  # CPU à 80MHz en idle (minimum pour UART 9600)
+      CONFIG_PM_DFS_INIT_FREQ: 40  # CPU à 40MHz en idle (suffisant pour UART 9600, économie maximale)
       CONFIG_PM_DFS_MAX: 160       # CPU à 160MHz max en charge
       # Watchdog matériel: redémarrage auto si blocage logiciel
       CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0: y
@@ -53,7 +53,7 @@ logger:
 # API Home Assistant avec protection redémarrage
 api:
   encryption:
-    key: "DJih/n8wOct7DXASAq2DYc3WgU81j4G9wYr+HS/uZ7k="
+    key: !secret api_encryption_key
   # CRITIQUE: Ne pas redémarrer si Home Assistant est perdu
   # Le chauffage doit fonctionner en autonome même sans Wifi
   reboot_timeout: 0s
@@ -61,9 +61,9 @@ api:
 # OTA sécurisé
 ota:
   - platform: esphome
-    password: "821a52851d4645f113fffc1c61404003"
-    # Safe mode pour rollback si nouveau firmware plante
-    # safe_mode: true
+    password: !secret ota_password
+    # Safe mode: rollback automatique après 5 échecs de démarrage
+    safe_mode: true
     # Port custom si besoin (évite conflit si plusieurs ESP)
     # port: 3232
 

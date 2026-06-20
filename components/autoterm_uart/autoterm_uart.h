@@ -305,6 +305,7 @@ class AutotermUART : public Component {
   float daily_fuel_last_published_{NAN};
   int last_fuel_reset_day_{-1};
   sensor::Sensor *daily_fuel_sensor_{nullptr};
+  uint32_t last_fuel_update_ms_{0};
 
   // Combustion efficiency tracking
   sensor::Sensor *combustion_efficiency_sensor_{nullptr};
