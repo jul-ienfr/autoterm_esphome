@@ -146,6 +146,21 @@ static constexpr float PID_KD_DEFAULT = 0.1f;   // Derivative gain
 static constexpr float PID_DEADBAND_C = 0.5f;   // No action if error < this
 static constexpr float PID_INTEGRAL_MAX = 5.0f;  // Anti-windup clamp
 
+// PID Gain Scheduling phases
+enum PIDPhase : uint8_t {
+  PID_PHASE_STARTUP = 0,     // First 5 minutes: aggressive heating
+  PID_PHASE_APPROACHING = 1, // Error < 2°C: reduce overshoot
+  PID_PHASE_STEADY = 2,      // Near target: precise maintenance
+};
+
+// Gain tables per phase (startup / approaching / steady)
+static constexpr float PID_GAINS[][3] = {
+  // {Kp,    Ki,    Kd}     Phase
+  { 3.0f,  0.2f,  0.0f },  // STARTUP: fast rise, no derivative
+  { 1.5f,  0.4f,  0.3f },  // APPROACHING: moderate, anticipate overshoot
+  { 1.0f,  0.6f,  0.1f },  // STEADY: slow integral, precise maintenance
+};
+
 class AutotermUART;      // Forward declaration
 class AutotermClimate;   // Forward declaration
 
@@ -293,6 +308,8 @@ class AutotermUART : public Component {
   float pid_integral_{0.0f};
   float pid_last_error_{0.0f};
   uint32_t pid_last_eval_ms_{0};
+  PIDPhase pid_phase_{PID_PHASE_STARTUP};
+  uint32_t pid_phase_start_ms_{0};
 
   // CRC Error Monitoring
   uint32_t crc_error_count_{0};
@@ -2027,12 +2044,37 @@ void AutotermUART::evaluate_frost_protection_() {
   float ext_temp = last_external_temp_c_;
   if (!std::isfinite(ext_temp)) return;
 
+  // === Standard frost protection: start if external temp is too low ===
   if (ext_temp < frost_protection_temp_c_ && ext_temp > -40.0f) {
     ESP_LOGW("autoterm_uart", "Frost protection: external temp %.1f°C < %.1f°C, starting heater",
              ext_temp, frost_protection_temp_c_);
     // Start in power mode at lowest level
     send_power_mode(true, 1);
     frost_protection_active_ = false;  // One-shot: don't restart continuously
+    return;
+  }
+
+  // === Prediction-based pre-heating: start early at low power if temp will drop ===
+  if (!prediction_active_ || !prediction_initialized_) return;
+
+  struct tm timeinfo;
+  if (!now_local(&timeinfo)) return;
+  int current_hour = timeinfo.tm_hour;
+
+  // Check next 2 hours for predicted temperature drop
+  for (int h = 1; h <= 2; h++) {
+    int check_hour = (current_hour + h) % 24;
+    if (!std::isfinite(prediction_temps_[check_hour])) continue;
+
+    float predicted_temp = prediction_temps_[check_hour];
+    if (predicted_temp < frost_protection_temp_c_ && ext_temp > frost_protection_temp_c_) {
+      // Temperature will drop below threshold in next 2 hours — pre-heat now at low power
+      ESP_LOGI("autoterm_uart", "Pre-heating: predicted T°=%.1f°C at hour %d (below %.1f°C), starting at level 1",
+               predicted_temp, check_hour, frost_protection_temp_c_);
+      send_power_mode(true, 1);
+      frost_protection_active_ = false;
+      return;
+    }
   }
 }
 
@@ -3183,6 +3225,20 @@ void AutotermUART::evaluate_eco_adaptive_(bool force) {
     ESP_LOGD("autoterm_uart", "ECO: overshoot predict dampening %.1f (deriv=%.2f)", dampening, derivative);
   }
 
+  // Exhaust temperature feedback: if combustion is efficient, reduce output
+  // High efficiency = exhaust temp is high relative to pump = good combustion = can reduce fuel
+  if (combustion_efficiency_pct_ > 0.0f && std::isfinite(combustion_efficiency_pct_)) {
+    if (combustion_efficiency_pct_ > 80.0f) {
+      // Very efficient combustion — reduce output by 10%
+      output *= 0.9f;
+      ESP_LOGD("autoterm_uart", "ECO: efficiency feedback %.0f%% → output ×0.9", combustion_efficiency_pct_);
+    } else if (combustion_efficiency_pct_ < 40.0f) {
+      // Poor combustion — increase output by 10% to compensate
+      output *= 1.1f;
+      ESP_LOGD("autoterm_uart", "ECO: efficiency feedback %.0f%% → output ×1.1", combustion_efficiency_pct_);
+    }
+  }
+
   // Map output to level 1-9
   float max_output = eco_kp_ * 5.0f;  // Reference: error=5°C at max gain
   float normalized = output / max_output;
@@ -3270,8 +3326,10 @@ uint8_t AutotermUART::compute_pid_output_(float current_temp, float target_temp,
     pid_last_error_ = error;
     eco_last_temp_ = current_temp;
     pid_integral_ = 0.0f;
+    pid_phase_start_ms_ = now;
+    pid_phase_ = PID_PHASE_STARTUP;
     // Map initial error to level: error=0 → level=1, error=5+ → level=9
-    float initial_output = pid_kp_ * error;
+    float initial_output = PID_GAINS[PID_PHASE_STARTUP][0] * error;  // Use startup Kp
     int level = static_cast<int>(std::round(1.0f + (initial_output / (pid_kp_ * 5.0f)) * 8.0f));
     level = std::max(static_cast<int>(eco_min_level_), std::min(static_cast<int>(eco_max_level_), level));
     pid_output_history_[0] = static_cast<float>(level);
@@ -3292,29 +3350,58 @@ uint8_t AutotermUART::compute_pid_output_(float current_temp, float target_temp,
     return thermostat_level_;
   }
 
-  // Proportional term
-  float p_term = pid_kp_ * error;
+  // === PID GAIN SCHEDULING ===
+  // Detect phase based on error magnitude and time since start
+  PIDPhase new_phase;
+  uint32_t time_since_start = now - pid_phase_start_ms_;
 
-  // Integral term with anti-windup
+  if (time_since_start < 300000) {  // First 5 minutes
+    new_phase = PID_PHASE_STARTUP;
+  } else if (std::fabs(error) < 2.0f) {
+    new_phase = PID_PHASE_STEADY;
+  } else {
+    new_phase = PID_PHASE_APPROACHING;
+  }
+
+  // Apply phase gains
+  if (new_phase != pid_phase_) {
+    pid_phase_ = new_phase;
+    pid_integral_ *= 0.5f;  // Reduce integral on phase change to prevent windup
+    ESP_LOGI("autoterm_uart", "PID phase → %s (Kp=%.1f Ki=%.1f Kd=%.1f)",
+             new_phase == PID_PHASE_STARTUP ? "STARTUP" :
+             new_phase == PID_PHASE_APPROACHING ? "APPROACHING" : "STEADY",
+             PID_GAINS[new_phase][0], PID_GAINS[new_phase][1], PID_GAINS[new_phase][2]);
+  }
+
+  // Use phase-based gains instead of fixed gains
+  float kp = PID_GAINS[pid_phase_][0];
+  float ki = PID_GAINS[pid_phase_][1];
+  float kd = PID_GAINS[pid_phase_][2];
+
+  // Proportional term
+  float p_term = kp * error;
+
+  // Integral term with anti-windup (uses phase-based Ki)
   pid_integral_ += error * dt;
   if (pid_integral_ > PID_INTEGRAL_MAX) pid_integral_ = PID_INTEGRAL_MAX;
   if (pid_integral_ < -PID_INTEGRAL_MAX) pid_integral_ = -PID_INTEGRAL_MAX;
-  float i_term = pid_ki_ * pid_integral_;
+  float i_term = ki * pid_integral_;
 
   // Derivative term on MEASUREMENT (not error) — avoids derivative kick on setpoint changes
+  // Uses phase-based Kd (0 during startup to avoid noise)
   float derivative = 0.0f;
   if (std::isfinite(eco_last_temp_) && dt > 0.0f) {
     derivative = -(current_temp - eco_last_temp_) / dt;  // Negative because d(error)/dt = -d(temp)/dt
   }
   eco_last_temp_ = current_temp;
-  float d_term = pid_kd_ * derivative;
+  float d_term = kd * derivative;
   pid_last_error_ = error;
 
   // Raw output
   float raw_output = p_term + i_term + d_term;
 
   // Map to level 1-9: output=0 → level=1, output=max → level=9
-  float max_output = pid_kp_ * 5.0f;  // Output when error = 5°C
+  float max_output = kp * 5.0f;  // Output when error = 5°C (uses phase-based Kp)
   float normalized = raw_output / max_output;  // Roughly [0, 1] for typical errors
   int level = static_cast<int>(std::round(1.0f + normalized * 8.0f));
   level = std::max(static_cast<int>(eco_min_level_), std::min(static_cast<int>(eco_max_level_), level));
