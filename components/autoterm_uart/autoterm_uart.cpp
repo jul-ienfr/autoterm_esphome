@@ -1875,19 +1875,20 @@ bool AutotermUART::send_command_(uint8_t command, const std::vector<uint8_t> &pa
 
   last_command_millis_ = now;
 
-  std::string payload_hex;
-  char temp[4];
+  // Use stack-allocated buffer for hex logging (avoids heap allocation)
+  char payload_hex[64];
+  payload_hex[0] = '\0';
+  size_t pos = 0;
   for (auto byte : payload) {
-    snprintf(temp, sizeof(temp), "%02X", byte);
-    payload_hex += temp;
-    payload_hex += ' ';
+    if (pos + 4 < sizeof(payload_hex)) {
+      pos += snprintf(payload_hex + pos, sizeof(payload_hex) - pos, "%02X ", byte);
+    }
   }
-  if (!payload_hex.empty())
-    payload_hex.pop_back();
+  if (pos > 0) payload_hex[pos - 1] = '\0';  // Remove trailing space
 
   ESP_LOGD("autoterm_uart", "Sent %s (cmd=0x%02X len=%u payload=[%s] crc=%04X)",
            log_label != nullptr ? log_label : "frame",
-           command, static_cast<unsigned>(payload.size()), payload_hex.c_str(), crc);
+           command, static_cast<unsigned>(payload.size()), payload_hex, crc);
   return true;
 }
 

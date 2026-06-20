@@ -446,6 +446,13 @@ class AutotermUART : public Component {
   static constexpr float CO_DANGER_PPM = 35.0f;  // Emergency shutdown above this
   static constexpr uint8_t CO_CONFIRM_REQUIRED = 3;  // Require 3 consecutive readings
 
+  // Timing variables (promoted from static locals in loop)
+  uint32_t last_frost_check_ms_{0};
+  bool diagnostic_sent_{false};
+  uint32_t last_report_request_ms_{0};
+  uint32_t last_maintenance_check_ms_{0};
+  uint32_t last_health_log_ms_{0};
+
   // Cached values for safety checks (updated from parse_status)
   float last_heater_temp_c_{NAN};
   float last_pump_freq_c_{0.0f};
@@ -648,32 +655,28 @@ class AutotermUART : public Component {
       evaluate_thermostat_control_();
 
     // Frost protection check (every 30 seconds)
-    static uint32_t last_frost_check = 0;
-    if (frost_protection_active_ && (now - last_frost_check) > 30000) {
+    if (frost_protection_active_ && (now - last_frost_check_ms_) > 30000) {
       evaluate_frost_protection_();
-      last_frost_check = now;
+      last_frost_check_ms_ = now;
     }
 
     // Extended protocol: enable diagnostic mode after 5 seconds uptime (once)
-    static bool diagnostic_sent = false;
-    if (diagnostic_mode_active_ && !diagnostic_sent && now > 5000) {
+    if (diagnostic_mode_active_ && !diagnostic_sent_ && now > 5000) {
       send_diagnostic_mode_(true);
-      diagnostic_sent = true;
+      diagnostic_sent_ = true;
     }
 
     // Request history/report every 5 minutes
-    static uint32_t last_report_request = 0;
-    if ((now - last_report_request) > 300000) {
+    if ((now - last_report_request_ms_) > 300000) {
       send_report_request_();
-      last_report_request = now;
+      last_report_request_ms_ = now;
     }
 
     // Maintenance check (every 5 minutes)
-    static uint32_t last_maintenance_check = 0;
-    if ((now - last_maintenance_check) > 300000) {
+    if ((now - last_maintenance_check_ms_) > 300000) {
       check_maintenance_();
       publish_maintenance_();
-      last_maintenance_check = now;
+      last_maintenance_check_ms_ = now;
     }
 
     // Software watchdog: track loop health
@@ -695,9 +698,8 @@ class AutotermUART : public Component {
     periodic_backup_(now);
 
     // System health log (every 15 minutes)
-    static uint32_t last_health_log = 0;
-    if ((now - last_health_log) > 900000) {
-      last_health_log = now;
+    if ((now - last_health_log_ms_) > 900000) {
+      last_health_log_ms_ = now;
       publish_system_health_();
     }
   }
@@ -743,6 +745,10 @@ class AutotermUART : public Component {
       prediction_temps_[i] = NAN;
       prediction_counts_[i] = 0;
     }
+
+    // Pre-reserve UART buffers to avoid heap fragmentation
+    display_to_heater_buffer_.reserve(128);
+    heater_to_display_buffer_.reserve(128);
 
     request_settings();
 
