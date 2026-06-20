@@ -1,150 +1,317 @@
-# 🔥 Bridge UART Autoterm pour ESPHome
+# 🔥 Autoterm UART Bridge pour ESPHome
 
-Ce projet implémente une **bridge UART bidirectionnelle** entre les chauffages Autoterm/Planar et leur panneau de commande, avec intégration native dans **ESPHome** (donc Home Assistant).
-Il permet de **surveiller et piloter le chauffage** via Wi‑Fi, MQTT ou les entités Home Assistant.
-
----
+Pont UART bidirectionnel entre les chauffages diesel **Autoterm/Planar** et leur panneau de commande, avec intégration native **ESPHome** et **Home Assistant**.
 
 > [!WARNING]
-> **Projet expérimental – utilisation à vos risques et périls !**
-> Ce dépôt est **encore en développement**. Un mauvais câblage, une configuration incorrecte ou un comportement imprévu du firmware peuvent **endommager le chauffage**.
->
+> **Projet expérimental — utilisation à vos risques et périls !**
+> Un mauvais câblage ou une configuration incorrecte peuvent **endommager le chauffage**.
 > En cas de doute : **ne pas utiliser**.
 
 ---
 
 ## 📦 Fonctionnalités
 
-- 🧭 **Bridge UART bidirectionnelle** entre l’afficheur (panneau) et le chauffage, avec relay de toutes les trames
-- 📊 **Capteurs** : température interne/externe/chauffage/panneau, tension d’alimentation, code/texte d’état, vitesses ventilateur (consigne/mesurée) et fréquence de pompe
-- 🌡️ **Entité Climate avec presets** : contrôle chauffage, auto, ventilation et niveaux de puissance via ESPHome/Home Assistant
-- 🎚️ **Réglages directs** : entité Number pour le niveau ventilateur et entité Select pour la source de température (incluant un feed « Home Assistant »)
-- 🛰️ **Panneau virtuel** : option d’override injectant une température externe dans le flux de données « panel »
-- 🧩 **Intégration Home Assistant** via composants ESPHome natifs
-- 🧾 **Logs détaillés** des trames UART (HEX) en niveau DEBUG
-- ⚙️ **Mode autonome** : requêtes status/settings automatiques si aucun panneau n’est détecté
+- 🧭 **Bridge UART bidirectionnelle** entre panneau et chauffage
+- 📊 **20+ capteurs** : températures, tension, pompe, carburant, usure, efficacité, diagnostic...
+- 🌡️ **Climate avec presets** : chauffage, auto, ventilation, thermostat, mode puissance
+- 🔴 **5 protections sécurité** : surtempérature, flameout, sous-tension, watchdog
+- 🟡 **PID controller** : régulation fine au lieu de on/off
+- 🟡 **Maintenance prédictive** : seuils configurables, score d'usure brûleur
+- 🟡 **Prédiction intelligente** : apprentissage des patterns horaires
+- 🟢 **8 modes** : nuit, frost, economy, PID, sleep, prediction, debug, autonomous
+- 🔌 **Protocole étendu** : diagnostic mode, unlock error 37, version firmware, historique
+- 🛰️ **Dashboard HTML** : interface web avec graphiques temps réel
+- 🏠 **19 automatisations HA** : alertes, maintenance, confort, énergie, lockout, eco-adaptive
+- 🔧 **Script Arduino** : test UART sans ESPHome pour débugger le hardware
 
 ---
 
-## Captures d’écran
-<img src="img/Screenshot_Heizen.png" width="300"><img src="img/Screenshot_HeizenLueften.png" width="300"><img src="img/Screenshot_Leistungmodus.png" width="300">
+## 📁 Structure du projet
 
----
-
-## 🔥 Modes de chauffage (détails)
-
-- **Mode puissance**
-  Fonctionnement « open loop » : le chauffage tourne uniquement au niveau choisi (`0–9`) et ignore les températures cibles. Pratique pour chauffer rapidement ou maintenir une forte puissance.
-
-- **Chauffage**
-  Régulation par paliers jusqu’à la consigne : le chauffage utilise la source de température choisie, monte en puissance jusqu’à la consigne puis continue en palier minimal.
-
-- **Chauffage + Ventilation**
-  Mode hybride : démarre en chauffage puis bascule en ventilation seule quand la consigne est atteinte. Si la température redescend, il repasse automatiquement en chauffage. En interne : `wait_mode = 0x01`.
-
-- **Ventilation seule**
-  Équivalent du mode « Ventiler uniquement » du panneau d’origine. Le brûleur reste éteint, seul le ventilateur tourne au niveau choisi (`0–9`).
-
-- **Thermostat**
-  Mode puissance avec hystérésis configurable : le chauffage tourne au niveau choisi jusqu’à dépasser la bande haute `SET + Hys_off`. Il lance ensuite un cycle de refroidissement (temporairement `SET − 5 °C`, `wait_mode = 0x01`). Dès que le statut « ventilation post‑refroidissement » est atteint, une commande Standby est envoyée et le brûleur reste éteint jusqu’à ce que la température repasse sous `SET − Hys_on`.
-
-Chaque mode peut être piloté via l’entité Climate ou automatisé via ESPHome/Home Assistant. Après un changement de preset, le firmware met à jour ses paramètres internes et envoie les trames UART correspondantes au chauffage.
-
----
-
-## ⚙️ Exemple de configuration
-
-Un exemple complet est fourni dans **`air4d.yaml`**.
-Il montre comment intégrer la composante Autoterm UART dans ESPHome.
-Adapte impérativement le fichier à ton **câblage, tes GPIOs et ton matériel**.
-
-> 📌 **Pour le câblage complet**, voir [WIRING.md](WIRING.md) (pinout, conversion de niveau logique, test de validation).
-
-### Config de test (diagnostic UART)
-
-Un fichier **`air4d_test.yaml`** est disponible pour diagnostiquer les problèmes de communication UART :
-- Framework **Arduino** (au lieu d'ESP-IDF)
-- Logger en **DEBUG complet**
-- Utile pour vérifier si le câblage fonctionne avant de passer en production
-
-### Config principale (production)
-
-La config optimisée se trouve dans **`Autoterme_Optimiser/air4d.yaml`** avec :
-- Framework ESP-IDF (unicore, 240MHz)
-- Filtres capteurs, alerte tension, debug mode toggle
-- Web server avec authentification
-
-Pour le mode thermostat, l’hystérésis se définit directement dans le bloc Climate :
-
-```yaml
-climate:
-  id: autoterm_climate
-  thermostat_hysteresis_on: 2.0     # allumer quand Temp < SET - 2 °C
-  thermostat_hysteresis_off: 1.0    # couper quand Temp > SET + 1 °C
+```
+Projet_Autoterm/
+├── components/autoterm_uart/
+│   ├── __init__.py              ← Registration ESPHome (380+ lignes)
+│   └── autoterm_uart.h          ← Composant C++ complet (3200+ lignes)
+├── air4d.yaml                   ← Config ESPHome production
+├── air4d_test.yaml              ← Config test diagnostic UART
+├── secrets.yaml                 ← WiFi + mots de passe (à remplir)
+├── dashboard.html               ← Interface web temps réel
+├── ha_automations.yaml          ← 19 automatisations Home Assistant
+├── test_uart.ino                ← Script Arduino test UART
+├── README.md                    ← Ce fichier
+├── INSTALLATION.md              ← Guide pas-à-pas d'installation
+├── WIRING.md                    ← Guide de câblage
+├── modie.md                     ← Référence protocole UART
+└── img/                         ← Captures d'écran
 ```
 
-Plages autorisées : `1–5 °C` (Hys_on) et `0–2 °C` (Hys_off).
+---
+
+## 🔴 Sécurité (5 protections)
+
+| Protection | Seuil | Action |
+|------------|-------|--------|
+| Surtempérature échappement | > 400°C | Arrêt immédiat |
+| Flameout (pompe active + T basse) | < 100°C / 60s | Coupe carburant |
+| Tension démarrage basse | < 10V pendant ignition | Alerte ERROR |
+| Tension critique opération | < 9.0V | Arrêt immédiat |
+| Watchdog matériel | 30s | Redémarrage auto |
 
 ---
 
-## 🧩 Entités Home Assistant
+## 🟢 Eco-Adaptive Mode ⭐
 
-| Type | Nom (par défaut) | Description |
-|------|-------------------|-------------|
-| Climate | Chauffage Autoterm | Entité Climate complète (modes, presets, consigne) |
-| Sensor | Température interne | Température interne du chauffage (°C) |
-| Sensor | Température externe | Sonde externe (°C) |
-| Sensor | Température chauffage | Température échangeur (°C) |
-| Sensor | Température panneau | Température panneau/afficheur (°C, réelle ou virtuelle) |
-| Sensor | Tension | Tension d’alimentation (V) |
-| Sensor | Ventilateur consigne | Vitesse ventilateur demandée (rpm) |
-| Sensor | Ventilateur réel | Vitesse ventilateur mesurée (rpm) |
-| Sensor | Fréquence pompe | Fréquence de la pompe doseuse (Hz) |
-| Text Sensor | Statut | Statut en clair (avec fallback HEX si inconnu) |
-| Select | Source température | Source (Interne/Panneau/Externe/Home Assistant) |
+Mode de chauffage recommandé. Module la puissance en continu (niveaux 1-9) sans jamais éteindre/reallumer le chauffage.
 
-Pour l’override de température « panneau », tu peux lier un capteur existant (par ex. depuis Home Assistant) et le référencer dans `panel_temp_override.sensor`. Il sera utilisé quand la source « Home Assistant » est sélectionnée.
+```yaml
+autoterm_uart:
+  eco_adaptive: true
+  eco_kp: 1.5          # Proportionnel (plus doux que PID)
+  eco_ki: 0.3          # Intégral (apprentissage de la pièce)
+  eco_kd: 0.2          # Dérivée (anticipation)
+  eco_min_level: 1     # Niveau minimum
+  eco_max_level: 9     # Niveau maximum
+  eco_deadband: 0.3    # Zone morte ±0.3°C
+  eco_overshoot_predict: true  # Anti-dépassement par feed-forward
+```
 
----
+**Avantages** :
+- 🛢️ Moins de carburant (pas de cycles arrêt/démarrage)
+- ⚡ Moins d'électricité (moins de démarrages = moins d'usage bougie)
+- 🔇 Moins de bruit (niveaux bas continus vs niveaux hauts intermittents)
+- 🔧 Moins d'usure (pas de stress thermique par cycles)
+- 🌡️ Température plus stable (±0.3°C vs ±3°C en hystérésis)
 
-## 🧠 Détails du protocole UART
-
-Chaque message (trame) a la structure suivante :
-
-| Index | Signification | Exemple | Description |
-|------:|--------------|---------|-------------|
-| 0 | Start | `0xAA` | Début de trame |
-| 1 | ID appareil | `0x03` / `0x04` | `0x03` = vers chauffage, `0x04` = réponse chauffage |
-| 2 | Longueur payload | ex. `0x13` | Nombre d’octets entre header et CRC |
-| 3 | ? | `0x00` | – |
-| 4 | Code fonction | `0x0F`, `0x02`, `0x03`, … | Type de message |
-| 5 … N−2 | Données | – | Variable |
-| N−2, N−1 | CRC | ex. `0x3A 0E` | CRC16 |
-
-Le calcul CRC est de type Modbus (voir sources).
+**Comment ça marche** : Le contrôleur calcule en permanence le niveau optimal basé sur l'erreur de température, sa vitesse de changement, et un modèle thermique appris. Le feed-forward prévient les dépassements en réduisant la puissance quand la température monte vite vers la cible.
 
 ---
 
-## 🧑‍💻 Dév & tests
+## 🟡 PID Controller (alternative)
 
-Testé avec :
+```yaml
+autoterm_uart:
+  pid_mode: true
+  pid_kp: 2.0    # Proportional (réactivité)
+  pid_ki: 0.5    # Integral (corrige l'erreur statique)
+  pid_kd: 0.1    # Derivative (anticipe les changements)
+```
 
-- **ESP32 DevKit v1**
-- **Autoterm Air 2D**
-- Sniffer UART / logs pour analyser le protocole
-- CRC16 Modbus
+Module la puissance (niveaux 1-9) proportionnellement à l'erreur de température. Réduit les oscillations et économise carburant.
+
+---
+
+## 🟡 Capteurs (20+)
+
+| Capteur | Unité | Description |
+|---------|-------|-------------|
+| `internal_temperature` | °C | T° interne chauffage |
+| `external_temperature` | °C | Sonde externe (avec fallback cache) |
+| `heater_temperature` | °C | T° échappement |
+| `panel_temperature` | °C | T° panneau |
+| `voltage` | V | Tension batterie |
+| `fan_speed_set` / `actual` | rpm | Ventilateur consigne/réel |
+| `pump_frequency` | Hz | Fréquence pompe |
+| `fuel_consumption` | L/h | Conso instantanée |
+| `total_fuel_consumed` | L | Conso totale cumulée |
+| `combustion_efficiency` | % | Efficacité combustion |
+| `delta_t` | °C | T° échappement - T° ambiante |
+| `ignition_time` | s | Temps d'allumage |
+| `wear_score` | % | Score usure brûleur |
+| `fuel_economy_savings` | % | Temps près de la cible |
+| `predicted_temp` | °C | Température prédite |
+| `boot_count` | — | Nombre de boots ESP32 |
+| `free_heap` | B | Mémoire libre |
+| `reset_reason` | texte | Dernière raison de reset |
+| `error_code` | — | Code erreur (byte 2 status) |
+| `total_starts` | — | Nombre total de démarrages |
+| `glow_plug_current` | % | Courant bougie préchauffage (diagnostic) |
+| `chamber_temp` | °C | T° chambre combustion (diagnostic) |
+| `board_temp` | °C | T° carte ECU (diagnostic) |
+
+---
+
+## 🟢 Modes
+
+| Mode | Description |
+|------|-------------|
+| **Eco-Adaptive** ⭐ | Mode adaptatif continu : module la puissance sans cycles on/off. Réduit carburant, électricité et usure. **Recommandé.** |
+| **PID** | Régulation proportionnelle-intégrale-dérivée (précurseur d'Eco-Adaptive) |
+| **Nuit** | Réduit puissance + ventilateur (moins de bruit) |
+| **Frostschutz** | Démarre auto si T° ext < 2°C |
+| **Fuel Economy** | Tracking + réduction proactive |
+| **Light Sleep** | Réduit consommation en veille |
+| **Prédiction** | Patterns horaires pour préchauffage |
+| **Debug** | Logs à chaud via switch HA |
+| **Autonomous** | Fonctionne sans panneau physique |
+
+---
+
+## 🏠 Entités Home Assistant
+
+| Type | Nom | Description |
+|------|-----|-------------|
+| Climate | Heating | Thermostat complet avec presets |
+| Sensor | 20+ capteurs | Voir tableau ci-dessus |
+| Text Sensor | error_text, firmware_version, error_log | Infos texte |
+| Switch | Night Mode | Mode nuit on/off |
+| Switch | Frost Protection | Protection anti-gel on/off |
+| Switch | Debug Mode | Logs DEBUG à chaud |
+| Button | Restart ESP | Redémarrage ESP32 |
+| Button | Safe Mode | Mode sûr pour récupération |
+| Button | Clear Lockout | Déverrouille error 37 |
+| Button | Prime Fuel Pump | Amorce pompe carburant |
+| Select | Temperature Source | Source de régulation (Int/Panel/Ext/HA) |
+
+---
+
+## 🔧 Modes de chauffage
+
+- **Mode puissance** : Fonctionnement open loop au niveau choisi (0-9)
+- **Chauffage** : Régulation par paliers jusqu'à la consigne
+- **Chauffage + Ventilation** : Hybride — chauffe puis ventilation seule à la consigne
+- **Ventilation seule** : Brûleur éteint, ventilateur actif
+- **Thermostat** : Puissance avec hystérésis configurable (on/off intelligent)
+- **PID** : Régulation proportionnelle-intégrale-dérivée (nouveau)
+
+---
+
+## ⚙️ Configuration rapide
+
+### 1. Créer `secrets.yaml`
+```yaml
+wifi_ssid: "TonWiFi"
+wifi_password: "TonMotDePasse"
+fallback_password: "AutotermFallback"
+web_username: "admin"
+web_password: "TonMotDePasse"
+```
+
+### 2. Compiler et flasher
+Voir [INSTALLATION.md](INSTALLATION.md) pour le guide complet.
+
+### 3. Options dans `air4d.yaml`
+```yaml
+autoterm_uart:
+  # Sécurité (activée par défaut)
+  frost_protection: true
+  frost_protection_temp: 2.0
+
+  # PID (désactivé par défaut)
+  pid_mode: false
+  pid_kp: 2.0
+  pid_ki: 0.5
+  pid_kd: 0.1
+
+  # Maintenance (seuils configurables)
+  maintenance_oil_hours: 500.0
+  maintenance_filter_hours: 200.0
+  maintenance_glow_hours: 1000.0
+
+  # Modes avancés (désactivés par défaut)
+  night_mode: false
+  fuel_economy: false
+  fuel_economy_reactive: false
+  prediction: false
+  light_sleep: false
+```
+
+---
+
+## 📄 Documentation
+
+- [INSTALLATION.md](INSTALLATION.md) — Guide pas-à-pas d'installation
+- [WIRING.md](WIRING.md) — Guide de câblage et pinout
+- [modie.md](modie.md) — Référence du protocole UART
+- [ha_automations.yaml](ha_automations.yaml) — Automatisations HA prêtes (19 automations)
+- [dashboard.html](dashboard.html) — Interface web temps réel
+- [test_uart.ino](test_uart.ino) — Script Arduino pour débugger le hardware
+
+### Documentation externe recommandée
+
+- [kalutep/serial_communication_protocol.md](https://github.com/kalutep/AutotermHeaterController/blob/main/serial_communication_protocol.md) — Spec complète du protocole (status codes, error codes, diagnostic telemetry)
+- [schroeder-robert/README.md](https://github.com/schroeder-robert/autoterm-air-2d-serial-control) — Documentation originale du protocole
+
+---
+
+## 📡 MQTT & Grafana (optionnel)
+
+Le composant publie automatiquement tous les capteurs via MQTT (configuré dans `air4d.yaml`).
+
+### Setup rapide
+
+1. **Broker MQTT** : Installer Mosquitto ou utiliser le broker HA intégré
+2. **InfluxDB** : Créer une base `autoterm` avec le plugin MQTT Telegraf
+3. **Grafana** : Ajouter InfluxDB comme source, créer les tableaux de bord
+
+### Topics MQTT publiés
+
+```
+autoterm/sensor/internal_temperature/state
+autoterm/sensor/voltage/state
+autoterm/sensor/fuel_consumption/state
+autoterm/sensor/eco_adaptive_level/state
+autoterm/sensor/eco_power_efficiency/state
+... (25+ capteurs)
+```
+
+### Exemple dashboard Grafana
+
+```json
+{
+  "panels": [
+    {"title": "Températures", "targets": [{"query": "SELECT mean(\"value\") FROM \"autoterm\" WHERE \"entity_id\" =~ /^internal_temperature|external_temperature|heater_temperature$/"}]},
+    {"title": "Consommation", "targets": [{"query": "SELECT mean(\"value\") FROM \"autoterm\" WHERE \"entity_id\" = 'fuel_consumption'"}]},
+    {"title": "Niveau Eco-Adaptive", "targets": [{"query": "SELECT last(\"value\") FROM \"autoterm\" WHERE \"entity_id\" = 'eco_adaptive_level'"}]}
+  ]
+}
+```
+
+---
+
+## 🧑‍💻 Développement & tests
+
+- ESP32 DevKit v1
+- Autoterm Air 2D / 4D
 - ESPHome 2025.x / Home Assistant 2025.x
 
 ---
 
-## 📚 Sources & références
+## 📚 Sources & Références
 
-- 🔗 [schroeder-robert / autoterm-air-2d-serial-control](https://github.com/schroeder-robert/autoterm-air-2d-serial-control)
-  Reverse engineering et contrôle de l’Autoterm Air 2D via liaison série.
+Ce projet s'appuie sur le travail de reverse-engineering et d'implémentation de plusieurs projets open-source :
+
+### Protocole UART
+
+| Projet | Contribution |
+|--------|-------------|
+| [schroeder-robert/autoterm-air-2d-serial-control](https://github.com/schroeder-robert/autoterm-air-2d-serial-control) | Documentation originale du protocole UART (13 commandes, frame structure, CRC16, status codes). Source principale pour les commandes `0x01`-`0x23`. |
+| [kalutep/AutotermHeaterController](https://github.com/kalutep/AutotermHeaterController) | Documentation protocol étendue avec captures de messages. Source pour le **mode diagnostic** (`0x07`), les **codes d'erreur** (17 codes documentés), l'**historique** (`0x0B`), et le format du flux de 72 octets. |
+
+### Implémentation ESPHome / Home Assistant
+
+| Projet | Contribution |
+|--------|-------------|
+| [tim0816/autoterm_esphome](https://github.com/tim0816/autoterm_esphome) | Composant ESPHome avec climate entity, bridge UART MITM, mode autonome. Référence pour l'architecture du bridge et la synchronisation état panel/HA. |
+| [hutterm/Autoterm-Air-2D-HACS](https://github.com/hutterm/Autoterm-Air-2D-HACS) | Intégration HA native (custom component). Référence pour le **fallback température externe** et la gestion des capteurs indisponibles. |
+
+### Autres
+
+| Projet | Contribution |
+|--------|-------------|
+| [AYeropkin/autoterm](https://github.com/AYeropkin/autoterm) | Reverse engineering du bus CAN pour intégration Victron GX. |
+| [k3mpaxl/pekaway-ha-autoterm](https://github.com/k3mpaxl/pekaway-ha-autoterm) | Intégration HA alternative. |
+| [esdete2/dbus-autoterm](https://github.com/esdete2/dbus-autoterm) | Plugin D-Bus pour Venus OS (Victron GX). |
+
+### Documentation protocole
+
+La documentation la plus complète se trouve dans le repo **kalutep** :
+- [`serial_communication_protocol.md`](https://github.com/kalutep/AutotermHeaterController/blob/main/serial_communication_protocol.md) — Spec complète avec tous les status codes, error codes, et le format du diagnostic telemetry (72 octets)
+- [`messages/`](https://github.com/kalutep/AutotermHeaterController/tree/main/messages) — Captures de messages bruts
+- [`message_captures/`](https://github.com/kalutep/AutotermHeaterController/tree/main/message_captures) — Logs du mode diagnostic avec le logiciel Autoterm Test v1.11
 
 ---
 
 ## 📄 Licence
 
-MIT License © 2025
-Développé par **Tim**
+MIT License © 2025 — Développé par **Tim**

@@ -1,0 +1,382 @@
+# ==============================================================
+# Autoterm Air 4D — Home Assistant Automatisations
+# ==============================================================
+# Copier ces automatisations dans:
+#   Settings → automations.yaml
+#   OU
+#   Settings → Automations → Import YAML
+#
+# Adapter les entity_id et services selon votre configuration.
+# ==============================================================
+
+# ──────────────────────────────────────────────
+# 🔴 SÉCURITÉ — Alertes critiques
+# ──────────────────────────────────────────────
+
+- alias: "Autoterm: Alerte Arrêt d'Urgence"
+  description: "Notification quand un arrêt d'urgence est détecté"
+  trigger:
+    - platform: state
+      entity_id: sensor.autoterm_status
+  condition:
+    - condition: template
+      value_template: >
+        {{ 'unknown' not in trigger.to_state.state | lower and
+           trigger.to_state.state != trigger.from_state.state }}
+  action:
+    - service: notify.notify
+      data:
+        title: "🚨 Autoterm ALERTE"
+        message: >
+          Statut changé: {{ trigger.to_state.state }}
+          Heure: {{ now().strftime('%H:%M:%S') }}
+  mode: single
+
+- alias: "Autoterm: Batterie Basse"
+  description: "Alerte quand la tension descend sous 11V"
+  trigger:
+    - platform: numeric_state
+      entity_id: sensor.autoterm_voltage
+      below: 11.0
+  action:
+    - service: notify.notify
+      data:
+        title: "⚠️ Autoterm: Batterie basse"
+        message: >
+          Tension: {{ states('sensor.autoterm_voltage') }}V
+          Température: {{ states('sensor.autoterm_heater_temperature') }}°C
+  mode: single
+
+- alias: "Autoterm: Échappement Surchauffé"
+  description: "Alerte quand la température d'échappement est critique"
+  trigger:
+    - platform: numeric_state
+      entity_id: sensor.autoterm_heater_temperature
+      above: 350
+  action:
+    - service: notify.notify
+      data:
+        title: "🔥 Autoterm: Surchauffe!"
+        message: >
+          T° échappement: {{ states('sensor.autoterm_heater_temperature') }}°C
+          La chauffe va s'arrêter automatiquement!
+  mode: single
+
+- alias: "Autoterm: Allumage Lent"
+  description: "Alerte quand le temps d'allumage dépasse 7 minutes"
+  trigger:
+    - platform: numeric_state
+      entity_id: sensor.autoterm_ignition_time
+      above: 420
+  action:
+    - service: notify.notify
+      data:
+        title: "⏱️ Autoterm: Allumage lent"
+        message: >
+          Temps d'allumage: {{ states('sensor.autoterm_ignition_time') }}s
+          Vérifier la bougie de préchauffage ou le filtre à carburant.
+  mode: single
+
+- alias: "Autoterm: Usure Brûleur"
+  description: "Alerte quand le score d'usure est faible"
+  trigger:
+    - platform: numeric_state
+      entity_id: sensor.autoterm_burner_wear_score
+      below: 70
+  action:
+    - service: notify.notify
+      data:
+        title: "🔧 Autoterm: Nettoyage brûleur"
+        message: >
+          Score d'usure: {{ states('sensor.autoterm_burner_wear_score') }}%
+          Nettoyage du brûleur recommandé.
+  mode: single
+
+# ──────────────────────────────────────────────
+# 🟡 MAINTENANCE — Rappels programmés
+# ──────────────────────────────────────────────
+
+- alias: "Autoterm: Rappel Maintenance Quotidien"
+  description: "Vérifie l'état de maintenance tous les jours à 8h"
+  trigger:
+    - platform: time
+      at: "08:00:00"
+  condition:
+    - condition: state
+      entity_id: binary_sensor.autoterm_heater
+      state: "off"
+  action:
+    - service: notify.notify
+      data:
+        title: "📋 Autoterm: État maintenance"
+        message: >
+          Heures: {{ states('sensor.autoterm_operating_hours') }}h
+          Huile: {{ states('sensor.autoterm_maintenance_oil_change') }}
+          Filtre: {{ states('sensor.autoterm_maintenance_filter_clean') }}
+          Bougie: {{ states('sensor.autoterm_maintenance_glow_plug') }}
+          Carburant total: {{ states('sensor.autoterm_total_fuel_consumed') }}L
+  mode: single
+
+# ──────────────────────────────────────────────
+# 🟢 CONFORT — Automatisations intelligentes
+# ──────────────────────────────────────────────
+
+- alias: "Autoterm: Préchauffage Matinal"
+  description: "Démarre le chauffage 30min avant le réveil en hiver"
+  trigger:
+    - platform: time
+      at: "06:30:00"
+  condition:
+    - condition: numeric_state
+      entity_id: sensor.outside_temperature
+      below: 5
+    - condition: time
+      weekday:
+        - mon
+        - tue
+        - wed
+        - thu
+        - fri
+  action:
+    - service: climate.set_temperature
+      target:
+        entity_id: climate.autoterm_heating
+      data:
+        temperature: 21
+    - service: climate.set_hvac_mode
+      target:
+        entity_id: climate.autoterm_heating
+      data:
+        hvac_mode: heat
+  mode: single
+
+- alias: "Autoterm: Arrêt Automatique"
+  description: "Éteint le chauffage après 2h d'inactivité"
+  trigger:
+    - platform: state
+      entity_id: climate.autoterm_heating
+      to: "heat"
+      for:
+        hours: 2
+  condition:
+    - condition: numeric_state
+      entity_id: sensor.autoterm_internal_temperature
+      above: 19
+  action:
+    - service: climate.turn_off
+      target:
+        entity_id: climate.autoterm_heating
+    - service: notify.notify
+      data:
+        title: "❄️ Autoterm: Arrêt automatique"
+        message: "Chauffage éteint après 2h (T° intérieure > 19°C)"
+  mode: single
+
+- alias: "Autoterm: Mode Nuit Auto"
+  description: "Active le mode nuit après 22h"
+  trigger:
+    - platform: time
+      at: "22:00:00"
+  action:
+    - service: switch.turn_on
+      target:
+        entity_id: switch.autoterm_night_mode
+  mode: single
+
+- alias: "Autoterm: Désactive Mode Nuit"
+  description: "Désactive le mode nuit à 7h"
+  trigger:
+    - platform: time
+      at: "07:00:00"
+  action:
+    - service: switch.turn_off
+      target:
+        entity_id: switch.autoterm_night_mode
+  mode: single
+
+- alias: "Autoterm: Protection Gel Auto"
+  description: "Active la protection anti-gel quand il gèle"
+  trigger:
+    - platform: numeric_state
+      entity_id: sensor.outside_temperature
+      below: 3
+  condition:
+    - condition: state
+      entity_id: switch.autoterm_frost_protection
+      state: "off"
+  action:
+    - service: switch.turn_on
+      target:
+        entity_id: switch.autoterm_frost_protection
+  mode: single
+
+# ──────────────────────────────────────────────
+# 🟡 ÉNERGIE — Suivi consommation
+# ──────────────────────────────────────────────
+
+- alias: "Autoterm: Rapport Quotidien Énergie"
+  description: "Envoie un résumé de consommation chaque soir"
+  trigger:
+    - platform: time
+      at: "20:00:00"
+  condition:
+    - condition: numeric_state
+      entity_id: sensor.autoterm_operating_hours
+      above: 0
+  action:
+    - service: notify.notify
+      data:
+        title: "📊 Autoterm: Rapport du jour"
+        message: >
+          Heures aujourd'hui: {{ states('sensor.autoterm_session_runtime') }}h
+          Conso totale: {{ states('sensor.autoterm_total_fuel_consumed') }}L
+          Efficacité: {{ states('sensor.autoterm_combustion_efficiency') }}%
+          Usure: {{ states('sensor.autoterm_burner_wear_score') }}%
+  mode: single
+
+# ──────────────────────────────────────────────
+# 🔴 SÉCURITÉ — Arrêt automatique
+# ──────────────────────────────────────────────
+
+- alias: "Autoterm: Arrêt Sécurité Tension"
+  description: "Éteint le chauffage si la tension est trop basse pendant le fonctionnement"
+  trigger:
+    - platform: numeric_state
+      entity_id: sensor.autoterm_voltage
+      below: 10.5
+      for:
+        minutes: 5
+  condition:
+    - condition: state
+      entity_id: climate.autoterm_heating
+      state: "heat"
+  action:
+    - service: climate.turn_off
+      target:
+        entity_id: climate.autoterm_heating
+    - service: notify.notify
+      data:
+        title: "🚨 Autoterm: Arrêt sécurité"
+        message: >
+          Tension trop basse: {{ states('sensor.autoterm_voltage') }}V
+          Chauffage éteint pour protéger la batterie.
+  mode: single
+
+# ──────────────────────────────────────────────
+# 🔒 ERROR 37 — Verrouillage dur
+# ──────────────────────────────────────────────
+
+- alias: "Autoterm: Alerte Error 37 (Lockout)"
+  description: "Notification quand le chauffage est verrouillé (3 échecs consécutifs)"
+  trigger:
+    - platform: state
+      entity_id: sensor.autoterm_error_code
+      to: "37"
+  action:
+    - service: notify.notify
+      data:
+        title: "🔒 Autoterm: LOCKOUT"
+        message: >
+          Error 37 activé! Le chauffage est verrouillé.
+          Utilisez le bouton "Clear Lockout" pour déverrouiller.
+          Error code: {{ states('sensor.autoterm_error_code') }}
+  mode: single
+
+- alias: "Autoterm: Alerte Code Erreur"
+  description: "Notification quand une erreur est détectée (code > 0)"
+  trigger:
+    - platform: numeric_state
+      entity_id: sensor.autoterm_error_code
+      above: 0
+  condition:
+    - condition: template
+      value_template: >
+        {{ states('sensor.autoterm_error_code') | int(0) != 0 }}
+  action:
+    - service: notify.notify
+      data:
+        title: "⚠️ Autoterm: Erreur"
+        message: >
+          Code erreur: {{ states('sensor.autoterm_error_code') }}
+          Description: {{ states('sensor.autoterm_error_text') }}
+  mode: single
+
+# ──────────────────────────────────────────────
+# 🟢 ECO-ADAPTIVE — Mode adaptatif
+# ──────────────────────────────────────────────
+
+- alias: "Autoterm: Alerte Eco-Adaptive Dépassement"
+  description: "Notification si le mode eco-adaptive détecte un dépassement critique"
+  trigger:
+    - platform: state
+      entity_id: sensor.autoterm_eco_adaptive_error
+  condition:
+    - condition: template
+      value_template: >
+        {{ states('sensor.autoterm_eco_adaptive_error') | float(0) < -2.0 }}
+  action:
+    - service: notify.notify
+      data:
+        title: "🌡️ Autoterm: Dépassement"
+        message: >
+          Température au-dessus de la cible de {{ states('sensor.autoterm_eco_adaptive_error') }}°C.
+          Le mode eco-adaptive a arrêté le chauffage.
+  mode: single
+
+- alias: "Autoterm: Rapport Efficacité Énergétique"
+  description: "Envoie un rapport d'efficacité tous les jours à 20h"
+  trigger:
+    - platform: time
+      at: "20:00:00"
+  condition:
+    - condition: state
+      entity_id: climate.autoterm_heating
+      state: "heat"
+  action:
+    - service: notify.notify
+      data:
+        title: "📊 Autoterm: Efficacité"
+        message: >
+          Niveau adaptatif: {{ states('sensor.autoterm_eco_adaptive_level') }}
+          Erreur: {{ states('sensor.autoterm_eco_adaptive_error') }}°C
+          Efficacité: {{ states('sensor.autoterm_eco_power_efficiency') }}%
+          État: {{ states('sensor.autoterm_eco_mode_status') }}
+          Conso: {{ states('sensor.autoterm_fuel_consumption') }} L/h
+  mode: single
+
+# ──────────────────────────────────────────────
+# ⚡ PERFORMANCE — Alertes énergie
+# ──────────────────────────────────────────────
+
+- alias: "Autoterm: Alerte Niveau Max Prolongé"
+  description: "Alerte si le chauffage reste au niveau max pendant 30 min (possible problème)"
+  trigger:
+    - platform: numeric_state
+      entity_id: sensor.autoterm_eco_adaptive_level
+      for:
+        minutes: 30
+      above: 8
+  action:
+    - service: notify.notify
+      data:
+        title: "⚡ Autoterm: Niveau max prolongé"
+        message: >
+          Le chauffage tourne au niveau {{ states('sensor.autoterm_eco_adaptive_level') }}
+          depuis 30 minutes. Vérifiez l'isolation ou la température extérieure.
+  mode: single
+
+- alias: "Autoterm: Rapport Consommation Quotidien"
+  description: "Résumé de consommation chaque matin à 8h"
+  trigger:
+    - platform: time
+      at: "08:00:00"
+  action:
+    - service: notify.notify
+      data:
+        title: "📈 Autoterm: Bilan quotidien"
+        message: >
+          Heures totales: {{ states('sensor.operating_hours') }}h
+          Carburant total: {{ states('sensor.total_fuel_consumed') }}L
+          Démarrages: {{ states('sensor.total_starts') }}
+          Usure: {{ states('sensor.burner_wear_score') }}%
+  mode: single

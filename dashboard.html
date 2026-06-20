@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Autoterm Air 4D — Dashboard</title>
+  <style>
+    :root { --bg: #0f0f1a; --card: #1a1a2e; --accent: #e94560; --accent2: #0f3460; --text: #eee; --dim: #667; --ok: #4caf50; --warn: #ff9800; --danger: #f44336; }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+    .header { background: var(--card); padding: 12px 20px; display: flex; align-items: center; gap: 12px; border-bottom: 2px solid var(--accent); position: sticky; top: 0; z-index: 100; }
+    .header h1 { font-size: 1.2em; font-weight: 600; }
+    .header .conn { margin-left: auto; padding: 3px 10px; border-radius: 10px; font-size: 0.8em; font-weight: 600; }
+    .conn.on { background: #0f3d0f; color: var(--ok); }
+    .conn.off { background: #3d0f0f; color: var(--danger); }
+    .controls { padding: 10px 20px; display: flex; gap: 6px; flex-wrap: wrap; background: var(--card); border-bottom: 1px solid #222; }
+    .btn { padding: 6px 14px; border: 1px solid var(--accent2); background: transparent; color: var(--text); border-radius: 6px; cursor: pointer; font-size: 0.85em; transition: all 0.15s; }
+    .btn:hover { background: var(--accent2); }
+    .btn.active { background: var(--accent); border-color: var(--accent); }
+    .btn.danger { border-color: var(--danger); color: var(--danger); }
+    .btn.danger:hover { background: var(--danger); color: #fff; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; padding: 16px; }
+    .card { background: var(--card); border-radius: 10px; padding: 16px; border: 1px solid #222; transition: border-color 0.2s; }
+    .card:hover { border-color: var(--accent2); }
+    .card h3 { font-size: 0.75em; color: var(--dim); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px; }
+    .card .val { font-size: 2em; font-weight: 700; line-height: 1.1; }
+    .card .unit { font-size: 0.45em; color: var(--dim); margin-left: 2px; }
+    .card .sub { font-size: 0.75em; color: var(--dim); margin-top: 4px; }
+    .val.ok { color: var(--ok); }
+    .val.warn { color: var(--warn); }
+    .val.danger { color: var(--danger); }
+    .chart-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 0 16px 16px; }
+    .chart-card { background: var(--card); border-radius: 10px; padding: 16px; border: 1px solid #222; }
+    .chart-card h3 { font-size: 0.75em; color: var(--dim); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }
+    .chart-container { position: relative; height: 180px; }
+    canvas { width: 100% !important; height: 100% !important; }
+    .bar { height: 6px; background: #222; border-radius: 3px; margin-top: 6px; overflow: hidden; }
+    .bar-fill { height: 100%; border-radius: 3px; transition: width 0.5s; }
+    .bar-fill.ok { background: var(--ok); }
+    .bar-fill.warn { background: var(--warn); }
+    .bar-fill.danger { background: var(--danger); }
+    @media (max-width: 768px) { .chart-grid { grid-template-columns: 1fr; } .grid { padding: 10px; gap: 8px; } .card .val { font-size: 1.6em; } }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>🔥 Autoterm Air 4D</h1>
+    <span class="conn off" id="conn">Offline</span>
+  </div>
+  <div class="controls">
+    <button class="btn" onclick="cmd('standby')">⏹ Off</button>
+    <button class="btn" onclick="cmd('heat')">🔥 Heat</button>
+    <button class="btn" onclick="cmd('fan')">💨 Fan</button>
+    <button class="btn danger" onclick="cmd('emergency')">🚨 Stop</button>
+    <button class="btn" id="btnAutoRefresh" onclick="toggleAutoRefresh()">🔄 Auto: ON</button>
+  </div>
+
+  <div class="grid">
+    <div class="card"><h3>Statut</h3><div class="val" id="status" style="font-size:1.2em">—</div></div>
+    <div class="card"><h3>Temp. Interne</h3><div class="val" id="tInt">—<span class="unit">°C</span></div></div>
+    <div class="card"><h3>Temp. Externe</h3><div class="val" id="tExt">—<span class="unit">°C</span></div></div>
+    <div class="card"><h3>Échappement</h3><div class="val" id="tHeat">—<span class="unit">°C</span></div><div class="sub" id="tHeatSub"></div></div>
+    <div class="card"><h3>Tension</h3><div class="val" id="volt">—<span class="unit">V</span></div>
+      <div class="bar"><div class="bar-fill ok" id="voltBar" style="width:80%"></div></div>
+    </div>
+    <div class="card"><h3>Pompe</h3><div class="val" id="pump">—<span class="unit">Hz</span></div></div>
+    <div class="card"><h3>Conso. Instant.</h3><div class="val" id="fuel">—<span class="unit">L/h</span></div><div class="sub" id="fuelTotal"></div></div>
+    <div class="card"><h3>Heures</h3><div class="val" id="runtime">—<span class="unit">h</span></div></div>
+    <div class="card"><h3>Efficacité</h3><div class="val" id="eff">—<span class="unit">%</span></div>
+      <div class="bar"><div class="bar-fill ok" id="effBar" style="width:0%"></div></div>
+    </div>
+    <div class="card"><h3>Delta-T</h3><div class="val" id="dT">—<span class="unit">°C</span></div></div>
+    <div class="card"><h3>Allumage</h3><div class="val" id="ign">—<span class="unit">s</span></div><div class="sub" id="ignSub"></div></div>
+    <div class="card"><h3>Usure</h3><div class="val" id="wear">—<span class="unit">%</span></div>
+      <div class="bar"><div class="bar-fill ok" id="wearBar" style="width:0%"></div></div>
+    </div>
+    <div class="card"><h3>WiFi</h3><div class="val" id="wifi">—<span class="unit">dBm</span></div></div>
+    <div class="card"><h3>Boot #</h3><div class="val" id="boot">—</div><div class="sub" id="resetReason"></div></div>
+    <div class="card"><h3>Heap Libre</h3><div class="val" id="heap">—<span class="unit">B</span></div></div>
+    <div class="card"><h3>Prédit</h3><div class="val" id="pred">—<span class="unit">°C</span></div></div>
+    <div class="card" style="border-color:#0f3460"><h3>🌿 Eco Level</h3><div class="val" id="ecoLevel">—</div><div class="sub" id="ecoStatus"></div></div>
+    <div class="card" style="border-color:#0f3460"><h3>🌿 Eco Erreur</h3><div class="val" id="ecoError">—<span class="unit">°C</span></div></div>
+    <div class="card" style="border-color:#0f3460"><h3>🌿 Efficacité</h3><div class="val" id="ecoEff">—<span class="unit">%</span></div>
+      <div class="bar"><div class="bar-fill ok" id="ecoEffBar" style="width:0%"></div></div>
+    </div>
+    <div class="card"><h3>Erreur Code</h3><div class="val" id="errCode">—</div><div class="sub" id="errText"></div></div>
+  </div>
+
+  <div class="chart-grid">
+    <div class="chart-card">
+      <h3>📊 Températures (dernières 20 mesures)</h3>
+      <div class="chart-container"><canvas id="chartTemp"></canvas></div>
+    </div>
+    <div class="chart-card">
+      <h3>📊 Pompe & Conso (dernières 20 mesures)</h3>
+      <div class="chart-container"><canvas id="chartPump"></canvas></div>
+    </div>
+  </div>
+
+  <script>
+    // ===== Config =====
+    const ESP = window.location.hostname;
+    const API = `http://${ESP}`;
+    const POLL = 2000;
+    let autoRefresh = true;
+    const MAX_POINTS = 20;
+
+    // ===== Mini Chart Engine =====
+    class MiniChart {
+      constructor(canvasId, labels, colors) {
+        this.canvas = document.getElementById(canvasId);
+        this.ctx = this.canvas.getContext('2d');
+        this.labels = labels;
+        this.colors = colors;
+        this.datasets = labels.map(() => []);
+      }
+      push(values) {
+        values.forEach((v, i) => {
+          this.datasets[i].push(v);
+          if (this.datasets[i].length > MAX_POINTS) this.datasets[i].shift();
+        });
+        this.draw();
+      }
+      draw() {
+        const c = this.canvas;
+        const ctx = this.ctx;
+        const W = c.parentElement.clientWidth;
+        const H = c.parentElement.clientHeight;
+        c.width = W; c.height = H;
+        ctx.clearRect(0, 0, W, H);
+
+        // Find range
+        let allVals = this.datasets.flat().filter(v => !isNaN(v) && isFinite(v));
+        if (allVals.length === 0) return;
+        let min = Math.min(...allVals) - 5;
+        let max = Math.max(...allVals) + 5;
+        if (max - min < 10) { min -= 5; max += 5; }
+
+        const pad = { t: 10, b: 20, l: 40, r: 10 };
+        const cw = W - pad.l - pad.r;
+        const ch = H - pad.t - pad.b;
+
+        // Grid
+        ctx.strokeStyle = '#222'; ctx.lineWidth = 0.5;
+        for (let i = 0; i <= 4; i++) {
+          const y = pad.t + (ch / 4) * i;
+          ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(W - pad.r, y); ctx.stroke();
+          ctx.fillStyle = '#666'; ctx.font = '10px sans-serif'; ctx.textAlign = 'right';
+          ctx.fillText((max - (max - min) * i / 4).toFixed(0), pad.l - 4, y + 3);
+        }
+
+        // Lines
+        this.datasets.forEach((data, di) => {
+          if (data.length < 2) return;
+          ctx.strokeStyle = this.colors[di]; ctx.lineWidth = 2; ctx.lineJoin = 'round';
+          ctx.beginPath();
+          data.forEach((v, i) => {
+            const x = pad.l + (i / (MAX_POINTS - 1)) * cw;
+            const y = pad.t + ch - ((v - min) / (max - min)) * ch;
+            i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+          });
+          ctx.stroke();
+
+          // Dots
+          data.forEach((v, i) => {
+            const x = pad.l + (i / (MAX_POINTS - 1)) * cw;
+            const y = pad.t + ch - ((v - min) / (max - min)) * ch;
+            ctx.fillStyle = this.colors[di];
+            ctx.beginPath(); ctx.arc(x, y, 2.5, 0, Math.PI * 2); ctx.fill();
+          });
+        });
+
+        // Legend
+        ctx.font = '10px sans-serif';
+        this.labels.forEach((l, i) => {
+          const x = pad.l + i * 80;
+          ctx.fillStyle = this.colors[i];
+          ctx.fillRect(x, H - 12, 12, 3);
+          ctx.fillStyle = '#aaa';
+          ctx.fillText(l, x + 16, H - 8);
+        });
+      }
+    }
+
+    const tempChart = new MiniChart('chartTemp', ['Interne', 'Externe', 'Échappement'], ['#4caf50', '#2196f3', '#ff9800']);
+    const pumpChart = new MiniChart('chartPump', ['Pompe Hz', 'Conso L/h'], ['#e94560', '#9c27b0']);
+
+    // ===== Sensors =====
+    const S = {
+      status: 'sensor.status_text', tInt: 'sensor.internal_temp', tExt: 'sensor.external_temp',
+      tHeat: 'sensor.heater_temp', volt: 'sensor.voltage', pump: 'sensor.pump_frequency',
+      fuel: 'sensor.fuel_consumption', fuelTotal: 'sensor.total_fuel_consumed', runtime: 'sensor.runtime_hours',
+      eff: 'sensor.combustion_efficiency', dT: 'sensor.delta_t', ign: 'sensor.ignition_time',
+      wear: 'sensor.wear_score', wifi: 'sensor.wifi_signal', boot: 'sensor.boot_count',
+      heap: 'sensor.free_heap', pred: 'sensor.predicted_temp', reset: 'sensor.reset_reason',
+      ecoLevel: 'sensor.eco_adaptive_level', ecoError: 'sensor.eco_adaptive_error',
+      ecoEff: 'sensor.eco_power_efficiency', errCode: 'sensor.error_code'
+    };
+
+    function val(id, v, dec = 1) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      const u = el.querySelector('.unit')?.textContent || '';
+      if (v === null || v === undefined || isNaN(v)) { el.innerHTML = `—<span class="unit">${u}</span>`; return; }
+      el.innerHTML = `${parseFloat(v).toFixed(dec)}<span class="unit">${u}</span>`;
+    }
+
+    function txt(id, t) { const el = document.getElementById(id); if (el) el.textContent = t; }
+
+    function colorClass(v, thresholds) {
+      if (isNaN(v)) return '';
+      if (v >= thresholds[1]) return 'danger';
+      if (v >= thresholds[0]) return 'warn';
+      return 'ok';
+    }
+
+    function barColor(id, pct, thresholds) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.style.width = Math.min(100, pct) + '%';
+      el.className = 'bar-fill ' + (pct >= thresholds[1] ? 'danger' : pct >= thresholds[0] ? 'warn' : 'ok');
+    }
+
+    // ===== Fetch =====
+    async function fetchSensor(key) {
+      try {
+        const r = await fetch(`${API}/sensor/${S[key].replace('sensor.', '')}/state`);
+        return r.ok ? await r.text() : null;
+      } catch { return null; }
+    }
+
+    async function poll() {
+      const d = {};
+      for (const k of Object.keys(S)) d[k] = await fetchSensor(k);
+
+      txt('status', d.status || '—');
+      val('tInt', d.tInt); val('tExt', d.tExt); val('tHeat', d.tHeat, 0);
+      val('volt', d.volt); val('pump', d.pump, 2); val('fuel', d.fuel);
+      val('runtime', d.runtime); val('eff', d.eff); val('dT', d.dT);
+      val('ign', d.ign); val('wear', d.wear, 0); val('wifi', d.wifi, 0);
+      val('boot', d.boot, 0); val('heap', d.heap, 0); val('pred', d.pred);
+
+      // Sub labels
+      txt('fuelTotal', d.fuelTotal ? `Total: ${parseFloat(d.fuelTotal).toFixed(2)} L` : '');
+      txt('ignSub', d.ign && parseFloat(d.ign) > 420 ? '⚠️ Lent' : '');
+      txt('resetReason', d.reset ? `Reset: ${d.reset}` : '');
+
+      // Heater temp status
+      const ht = parseFloat(d.tHeat);
+      const htEl = document.getElementById('tHeatSub');
+      if (htEl) htEl.textContent = isNaN(ht) ? '' : ht > 400 ? '🔴 CRITIQUE' : ht > 300 ? '⚡ Élevée' : ht > 100 ? '✅ Normale' : '❄️ Froide';
+
+      // Voltage bar (9-14V range)
+      const v = parseFloat(d.volt);
+      barColor('voltBar', isNaN(v) ? 0 : ((v - 9) / 5) * 100, [60, 80]);
+
+      // Efficiency bar
+      const e = parseFloat(d.eff);
+      barColor('effBar', isNaN(e) ? 0 : e, [50, 80]);
+
+      // Wear bar (inverted: 100% = good)
+      const w = parseFloat(d.wear);
+      barColor('wearBar', isNaN(w) ? 0 : w, [30, 70]);
+
+      // Eco-adaptive sensors
+      val('ecoLevel', d.ecoLevel, 0);
+      val('ecoError', d.ecoError);
+      val('ecoEff', d.ecoEff, 0);
+      const ecoEffVal = parseFloat(d.ecoEff);
+      barColor('ecoEffBar', isNaN(ecoEffVal) ? 0 : ecoEffVal, [30, 60]);
+      const ecoStEl = document.getElementById('ecoStatus');
+      if (ecoStEl) ecoStEl.textContent = d.ecoLevel ? `Niveau ${d.ecoLevel}` : '';
+
+      // Error code
+      val('errCode', d.errCode, 0);
+      // Error text will be fetched separately if needed
+
+      // Connection
+      const c = document.getElementById('conn');
+      if (d.status && d.status !== '—') { c.textContent = 'Online'; c.className = 'conn on'; }
+      else { c.textContent = 'Offline'; c.className = 'conn off'; }
+
+      // Charts
+      tempChart.push([parseFloat(d.tInt), parseFloat(d.tExt), parseFloat(d.tHeat)]);
+      pumpChart.push([parseFloat(d.pump), parseFloat(d.fuel)]);
+    }
+
+    function cmd(c) { console.log('CMD:', c); alert(`Commande "${c}" — utilisez Home Assistant ou MQTT pour les commandes.`); }
+    function toggleAutoRefresh() {
+      autoRefresh = !autoRefresh;
+      document.getElementById('btnAutoRefresh').textContent = `🔄 Auto: ${autoRefresh ? 'ON' : 'OFF'}`;
+      document.getElementById('btnAutoRefresh').classList.toggle('active', autoRefresh);
+    }
+
+    // Init
+    document.getElementById('btnAutoRefresh').classList.add('active');
+    poll();
+    setInterval(() => { if (autoRefresh) poll(); }, POLL);
+  </script>
+</body>
+</html>
