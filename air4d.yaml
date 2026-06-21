@@ -721,8 +721,7 @@ interval:
           level: INFO
           format: "Autoterm stats: uptime check, CRC errors, maintenance status"
       - lambda: |-
-          // Feed watchdog
-          esp_task_wdt_reset();
+          // Watchdog is fed automatically by ESPHome loop
 
 # Configuration temps (pour timestamps corrects)
 time:

@@ -33,6 +33,9 @@
 namespace esphome {
 namespace autoterm_uart {
 
+// Helper: fill a struct tm with current local time, returns true on success
+bool now_local(struct tm *timeinfo);
+
 // Protocol constants
 static constexpr uint8_t FRAME_HEADER = 0xAA;
 static constexpr uint8_t DEVICE_DISPLAY = 0x03;
@@ -220,6 +223,10 @@ class AutotermResetGlowButton : public button::Button {
 // ===================
 class AutotermUART : public Component {
   friend class AutotermTempSourceSelect;
+  friend class AutotermStatusReportButton;
+  friend class AutotermResetOilButton;
+  friend class AutotermResetFilterButton;
+  friend class AutotermResetGlowButton;
 
  public:
   uart::UARTComponent *uart_display_{nullptr};
@@ -594,6 +601,7 @@ class AutotermUART : public Component {
     }
   }
   void set_status_text_sensor(text_sensor::TextSensor *s) { status_text_sensor_ = s; }
+  text_sensor::TextSensor *get_status_text_sensor() const { return status_text_sensor_; }
   void set_runtime_hours_sensor(sensor::Sensor *s);
   void set_session_runtime_sensor(sensor::Sensor *s);
 

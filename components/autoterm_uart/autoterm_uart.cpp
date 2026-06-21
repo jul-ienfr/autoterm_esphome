@@ -5,12 +5,21 @@
 
 #include "autoterm_uart.h"
 #include <ctime>
+#include "driver/gpio.h"
+#include "esp_sleep.h"
 
 namespace esphome {
 namespace autoterm_uart {
 
 using namespace esphome::uart;
 using namespace esphome::sensor;
+
+// Helper: fill a struct tm with current local time
+bool now_local(struct tm *timeinfo) {
+  time_t now;
+  time(&now);
+  return localtime_r(&now, timeinfo) != nullptr;
+}
 
 // ===================
 // Forward and sniff implementation
@@ -212,7 +221,7 @@ void AutotermStatusReportButton::press_action() {
   // Request all diagnostic data
   parent_->send_version_request_();
   parent_->send_report_request_();
-  parent_->send_status_request_();
+  parent_->send_status_request();
   parent_->send_diagnostic_mode_(true);
   // Build status report text
   static char report_buf[256];
@@ -455,7 +464,7 @@ void AutotermUART::reset_oil_maintenance_() {
     oil_reset_pref_.save(&oil_reset_hours_);
   maintenance_alert_oil_ = false;
   publish_maintenance_counters_();
-  publish_maintenance_(true);
+  publish_maintenance_();
   ESP_LOGI("autoterm_uart", "Maintenance: oil (combustion chamber) counter reset at %.1fh", runtime_hours_);
 }
 
@@ -465,7 +474,7 @@ void AutotermUART::reset_filter_maintenance_() {
     filter_reset_pref_.save(&filter_reset_hours_);
   maintenance_alert_filter_ = false;
   publish_maintenance_counters_();
-  publish_maintenance_(true);
+  publish_maintenance_();
   ESP_LOGI("autoterm_uart", "Maintenance: fuel filter counter reset at %.1fh", runtime_hours_);
 }
 
@@ -475,7 +484,7 @@ void AutotermUART::reset_glow_maintenance_() {
     glow_reset_pref_.save(&glow_reset_hours_);
   maintenance_alert_glow_ = false;
   publish_maintenance_counters_();
-  publish_maintenance_(true);
+  publish_maintenance_();
   ESP_LOGI("autoterm_uart", "Maintenance: glow plug counter reset at %.1fh", runtime_hours_);
 }
 
@@ -625,7 +634,6 @@ void AutotermUART::update_fuel_consumption_(float pump_freq) {
   fuel_consumption_lph_ = smoothed_pump_freq_ * FUEL_LITERS_PER_HZ;
 
   // Accumulate fuel consumed using ACTUAL elapsed time (not hardcoded interval)
-  uint32_t now = millis();
   if (heater_running_ && pump_freq > 0 && last_fuel_update_ms_ > 0) {
     float elapsed_s = static_cast<float>(now - last_fuel_update_ms_) / 1000.0f;
     if (elapsed_s > 0.0f && elapsed_s < 30.0f) {  // Sanity check: max 30s between updates
@@ -1638,7 +1646,9 @@ void AutotermUART::check_co_level_() {
   if (co_ppm >= CO_DANGER_PPM) {
     co_confirm_count_++;
     if (co_confirm_count_ >= CO_CONFIRM_REQUIRED) {
-      emergency_stop_("CO level critical: %.1f ppm >= %.1f ppm — LEAK DETECTED", co_ppm, CO_DANGER_PPM);
+      char co_msg[128];
+      snprintf(co_msg, sizeof(co_msg), "CO level critical: %.1f ppm >= %.1f ppm — LEAK DETECTED", co_ppm, CO_DANGER_PPM);
+      emergency_stop_(co_msg);
       co_confirm_count_ = 0;
     } else {
       ESP_LOGW("autoterm_uart", "CO WARNING: %.1f ppm (confirming %u/%u)",
@@ -2185,7 +2195,8 @@ void AutotermUART::send_fan_only(uint8_t level) {
 // ===================
 
 void AutotermUART::send_diagnostic_mode_(bool enable) {
-  std::vector<uint8_t> payload{enable ? 0x01 : 0x00};
+  uint8_t val = enable ? 0x01 : 0x00;
+  std::vector<uint8_t> payload{val};
   send_command_(FUNC_DIAGNOSTIC, payload, enable ? "diagnostic.enable" : "diagnostic.disable");
   ESP_LOGI("autoterm_uart", "Diagnostic mode %s", enable ? "enabled" : "disabled");
 }
@@ -3008,10 +3019,7 @@ void AutotermClimate::set_thermostat_hysteresis(float hys_on_c, float hys_off_c)
 climate::ClimateTraits AutotermClimate::traits() {
   climate::ClimateTraits traits;
 
-  traits.set_supports_two_point_target_temperature(false);
-  traits.set_supports_action(true);
-
-  // Temperature limits
+  traits.set_supported_modes({climate::CLIMATE_MODE_OFF, climate::CLIMATE_MODE_HEAT, climate::CLIMATE_MODE_FAN_ONLY});
   traits.set_visual_min_temperature(0.0f);
   traits.set_visual_max_temperature(30.0f);
   traits.set_visual_temperature_step(1.0f);
@@ -3036,16 +3044,6 @@ climate::ClimateTraits AutotermClimate::traits() {
 
   traits.set_supported_custom_presets(presets_ptr);
   traits.set_supported_custom_fan_modes(fan_modes_ptr);
-
-  // Supported modes
-  std::set<climate::ClimateMode> modes;
-  modes.insert(climate::CLIMATE_MODE_OFF);
-  modes.insert(climate::CLIMATE_MODE_HEAT);
-  modes.insert(climate::CLIMATE_MODE_FAN_ONLY);
-  traits.set_supported_modes(modes);
-
-  // Note: set_supports_current_temperature is deprecated in 2025.11
-  // Current temperature is auto-detected when current_temperature is set
 
   return traits;
 }
