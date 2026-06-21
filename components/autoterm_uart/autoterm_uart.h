@@ -190,6 +190,31 @@ class AutotermStatusReportButton : public button::Button {
   void press_action() override;
 };
 
+// Maintenance Reset Buttons: mark maintenance as done
+class AutotermResetOilButton : public button::Button {
+ public:
+  AutotermUART *parent_{nullptr};
+  void set_parent(AutotermUART *p) { parent_ = p; }
+ protected:
+  void press_action() override;
+};
+
+class AutotermResetFilterButton : public button::Button {
+ public:
+  AutotermUART *parent_{nullptr};
+  void set_parent(AutotermUART *p) { parent_ = p; }
+ protected:
+  void press_action() override;
+};
+
+class AutotermResetGlowButton : public button::Button {
+ public:
+  AutotermUART *parent_{nullptr};
+  void set_parent(AutotermUART *p) { parent_ = p; }
+ protected:
+  void press_action() override;
+};
+
 // ===================
 // Main class UART
 // ===================
@@ -480,6 +505,12 @@ class AutotermUART : public Component {
   bool burnout_protection_active_{false};
   uint32_t burnout_start_ms_{0};
   static constexpr uint32_t BURNOUT_PROTECTION_MS = 240000;  // 4 minutes
+  static constexpr uint8_t BURNOUT_MIN_LEVEL = 3;  // Minimum power level during burnout (ensures complete combustion)
+
+  // Shutdown monitoring: track purge fan sequence
+  bool shutdown_monitoring_active_{false};
+  uint32_t shutdown_start_ms_{0};
+  static constexpr uint32_t SHUTDOWN_PURGE_TIMEOUT_MS = 300000;  // 5 minutes max purge time
 
   // Minimum run time: prevent rapid cycling (extends glow plug and fuel pump life)
   uint32_t heater_stopped_ms_{0};
@@ -584,6 +615,21 @@ class AutotermUART : public Component {
   void set_maintenance_filter_hrs(float hrs) { maintenance_filter_hrs_ = hrs; }
   void set_maintenance_glow_hrs(float hrs) { maintenance_glow_hrs_ = hrs; }
   void set_burn_cycle_interval_hours(float hrs) { burn_cycle_interval_hours_ = hrs; }
+
+  // Maintenance counter sensor setters
+  void set_maintenance_oil_since_sensor(sensor::Sensor *s) { maintenance_oil_since_sensor_ = s; }
+  void set_maintenance_oil_remaining_sensor(sensor::Sensor *s) { maintenance_oil_remaining_sensor_ = s; }
+  void set_maintenance_filter_since_sensor(sensor::Sensor *s) { maintenance_filter_since_sensor_ = s; }
+  void set_maintenance_filter_remaining_sensor(sensor::Sensor *s) { maintenance_filter_remaining_sensor_ = s; }
+  void set_maintenance_glow_since_sensor(sensor::Sensor *s) { maintenance_glow_since_sensor_ = s; }
+  void set_maintenance_glow_remaining_sensor(sensor::Sensor *s) { maintenance_glow_remaining_sensor_ = s; }
+
+  // Maintenance reset methods
+  void reset_oil_maintenance_();
+  void reset_filter_maintenance_();
+  void reset_glow_maintenance_();
+  void publish_maintenance_counters_();
+
   // Extended protocol sensor setters
   void set_glow_plug_current_sensor(sensor::Sensor *s) { glow_plug_current_sensor_ = s; }
   void set_chamber_temp_sensor(sensor::Sensor *s) { chamber_temp_sensor_ = s; }
@@ -711,6 +757,20 @@ class AutotermUART : public Component {
     // CO sensor check (SAVES LIVES — runs on every loop)
     check_co_level_();
 
+    // Shutdown monitoring: track purge fan sequence
+    if (shutdown_monitoring_active_) {
+      uint32_t shutdown_elapsed = now - shutdown_start_ms_;
+      if (shutdown_elapsed > SHUTDOWN_PURGE_TIMEOUT_MS) {
+        ESP_LOGW("autoterm_uart", "Shutdown: purge fan timeout (%.0fs > 5min) — fan possibly stuck",
+                 shutdown_elapsed / 1000.0f);
+        shutdown_monitoring_active_ = false;
+      } else if (!heater_running_ && shutdown_elapsed > 10000) {
+        // Heater has fully stopped and purge completed
+        ESP_LOGI("autoterm_uart", "Shutdown: purge fan completed in %.0fs", shutdown_elapsed / 1000.0f);
+        shutdown_monitoring_active_ = false;
+      }
+    }
+
     // Emergency recovery check (auto-recover after 5 minutes if safe)
     check_emergency_recovery_(now);
 
@@ -813,10 +873,23 @@ class AutotermUART : public Component {
       if (!burn_cycle_hours_pref_.load(&last_burn_cycle_hours_)) {
         last_burn_cycle_hours_ = 0.0f;
       }
+      // Maintenance counters: hours at last reset (persisted to track time since maintenance)
+      oil_reset_pref_ =
+          global_preferences->make_preference<float>(fnv1_hash("autoterm_maint_oil_reset"));
+      filter_reset_pref_ =
+          global_preferences->make_preference<float>(fnv1_hash("autoterm_maint_filter_reset"));
+      glow_reset_pref_ =
+          global_preferences->make_preference<float>(fnv1_hash("autoterm_maint_glow_reset"));
+      if (!oil_reset_pref_.load(&oil_reset_hours_)) oil_reset_hours_ = 0.0f;
+      if (!filter_reset_pref_.load(&filter_reset_hours_)) filter_reset_hours_ = 0.0f;
+      if (!glow_reset_pref_.load(&glow_reset_hours_)) glow_reset_hours_ = 0.0f;
     } else {
       runtime_storage_initialized_ = false;
       runtime_hours_ = 0.0f;
       last_burn_cycle_hours_ = 0.0f;
+      oil_reset_hours_ = 0.0f;
+      filter_reset_hours_ = 0.0f;
+      glow_reset_hours_ = 0.0f;
     }
     runtime_loaded_ = true;
     runtime_hours_last_published_ = NAN;
@@ -910,6 +983,7 @@ public:
   void publish_session_runtime_(bool force = false);
   void maybe_save_runtime_hours_(uint32_t now, bool force = false);
   void save_burn_cycle_hours_();
+  void save_maintenance_counters_();
   bool is_heater_active_status_(uint16_t status_code) const;
 
   // New: Reliability

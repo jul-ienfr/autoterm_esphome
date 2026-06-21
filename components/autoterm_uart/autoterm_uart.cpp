@@ -445,8 +445,87 @@ void AutotermUART::save_burn_cycle_hours_() {
   }
 }
 
+// ===================
+// Maintenance counter tracking
+// ===================
+
+void AutotermUART::reset_oil_maintenance_() {
+  oil_reset_hours_ = runtime_hours_;
+  if (runtime_storage_initialized_)
+    oil_reset_pref_.save(&oil_reset_hours_);
+  maintenance_alert_oil_ = false;
+  publish_maintenance_counters_();
+  publish_maintenance_(true);
+  ESP_LOGI("autoterm_uart", "Maintenance: oil (combustion chamber) counter reset at %.1fh", runtime_hours_);
+}
+
+void AutotermUART::reset_filter_maintenance_() {
+  filter_reset_hours_ = runtime_hours_;
+  if (runtime_storage_initialized_)
+    filter_reset_pref_.save(&filter_reset_hours_);
+  maintenance_alert_filter_ = false;
+  publish_maintenance_counters_();
+  publish_maintenance_(true);
+  ESP_LOGI("autoterm_uart", "Maintenance: fuel filter counter reset at %.1fh", runtime_hours_);
+}
+
+void AutotermUART::reset_glow_maintenance_() {
+  glow_reset_hours_ = runtime_hours_;
+  if (runtime_storage_initialized_)
+    glow_reset_pref_.save(&glow_reset_hours_);
+  maintenance_alert_glow_ = false;
+  publish_maintenance_counters_();
+  publish_maintenance_(true);
+  ESP_LOGI("autoterm_uart", "Maintenance: glow plug counter reset at %.1fh", runtime_hours_);
+}
+
+void AutotermUART::publish_maintenance_counters_() {
+  // Oil (combustion chamber cleaning)
+  float oil_since = runtime_hours_ - oil_reset_hours_;
+  float oil_remaining = maintenance_oil_hrs_ - oil_since;
+  if (maintenance_oil_since_sensor_) maintenance_oil_since_sensor_->publish_state(oil_since);
+  if (maintenance_oil_remaining_sensor_) maintenance_oil_remaining_sensor_->publish_state(oil_remaining);
+
+  // Fuel filter
+  float filter_since = runtime_hours_ - filter_reset_hours_;
+  float filter_remaining = maintenance_filter_hrs_ - filter_since;
+  if (maintenance_filter_since_sensor_) maintenance_filter_since_sensor_->publish_state(filter_since);
+  if (maintenance_filter_remaining_sensor_) maintenance_filter_remaining_sensor_->publish_state(filter_remaining);
+
+  // Glow plug
+  float glow_since = runtime_hours_ - glow_reset_hours_;
+  float glow_remaining = maintenance_glow_hrs_ - glow_since;
+  if (maintenance_glow_since_sensor_) maintenance_glow_since_sensor_->publish_state(glow_since);
+  if (maintenance_glow_remaining_sensor_) maintenance_glow_remaining_sensor_->publish_state(glow_remaining);
+}
+
+void AutotermUART::save_maintenance_counters_() {
+  if (!runtime_storage_initialized_)
+    return;
+  oil_reset_pref_.save(&oil_reset_hours_);
+  filter_reset_pref_.save(&filter_reset_hours_);
+  glow_reset_pref_.save(&glow_reset_hours_);
+}
+
+// Button implementations
+void AutotermResetOilButton::press_action() {
+  if (parent_) parent_->reset_oil_maintenance_();
+}
+
+void AutotermResetFilterButton::press_action() {
+  if (parent_) parent_->reset_filter_maintenance_();
+}
+
+void AutotermResetGlowButton::press_action() {
+  if (parent_) parent_->reset_glow_maintenance_();
+}
+
 bool AutotermUART::is_heater_active_status_(uint16_t status_code) const {
-  if (status_code == 0x0000 || status_code == STATUS_STANDBY)
+  // Return false for non-active states: sleep, standby, cooling, idle vent, shutdown
+  // This ensures runtime hours are only counted during actual heating
+  if (status_code == STATUS_SLEEP || status_code == STATUS_STANDBY ||
+      status_code == STATUS_COOLING || status_code == STATUS_IDLE_VENT ||
+      status_code == STATUS_SHUTDOWN)
     return false;
   return true;
 }
@@ -689,6 +768,21 @@ void AutotermUART::update_combustion_efficiency_(float heater_temp, float ambien
       efficiency_baseline_ = avg;
       efficiency_sum_ = 0.0f;
       efficiency_samples_ = 0;
+    }
+  }
+
+  // Exhaust temperature alerts (scientific recommendations: 200-400°C optimal range)
+  static uint32_t last_exhaust_alert_ms = 0;
+  if ((now - last_exhaust_alert_ms) > 60000) {  // Check every 60 seconds
+    last_exhaust_alert_ms = now;
+    if (heater_running_ && effective_exhaust_temp > 50.0f) {
+      if (effective_exhaust_temp < 200.0f) {
+        ESP_LOGW("autoterm_uart", "EXHAUST LOW: %.0f°C < 200°C — incomplete combustion, soot risk",
+                 effective_exhaust_temp);
+      } else if (effective_exhaust_temp > 450.0f) {
+        ESP_LOGW("autoterm_uart", "EXHAUST HIGH: %.0f°C > 450°C — excess fuel or airflow blocked",
+                 effective_exhaust_temp);
+      }
     }
   }
 }
@@ -1142,6 +1236,7 @@ void AutotermUART::periodic_backup_(uint32_t now) {
   maybe_save_fuel_(now, true);
   save_stats_();
   save_burn_cycle_hours_();
+  save_maintenance_counters_();
 
   // Save prediction data if active
   if (prediction_active_ && prediction_initialized_)
@@ -1278,6 +1373,7 @@ void AutotermUART::publish_maintenance_() {
     maintenance_filter_sensor_->publish_state(maintenance_alert_filter_ ? 1.0f : 0.0f);
   if (maintenance_glow_sensor_)
     maintenance_glow_sensor_->publish_state(maintenance_alert_glow_ ? 1.0f : 0.0f);
+  publish_maintenance_counters_();
 }
 
 // ===================
@@ -2013,6 +2109,12 @@ bool AutotermUART::send_command_(uint8_t command, const std::vector<uint8_t> &pa
 
 void AutotermUART::send_standby() {
   send_command_(FUNC_STANDBY, {}, "mode.standby");
+  // Activate shutdown monitoring to track purge fan sequence
+  if (!shutdown_monitoring_active_) {
+    shutdown_monitoring_active_ = true;
+    shutdown_start_ms_ = millis();
+    ESP_LOGI("autoterm_uart", "Shutdown: monitoring purge fan sequence");
+  }
 }
 
 void AutotermUART::send_power_mode(bool start, uint8_t level) {
@@ -2604,6 +2706,14 @@ void AutotermUART::evaluate_eco_adaptive_(bool force) {
                level, altitude_max, air_density_factor_);
       level = altitude_max;
     }
+  }
+
+  // Burnout protection: force minimum level during first 4 minutes after ignition
+  // Ensures complete combustion and prevents soot buildup during critical warm-up
+  if (burnout_protection_active_ && level < static_cast<int>(BURNOUT_MIN_LEVEL)) {
+    ESP_LOGD("autoterm_uart", "ECO: burnout floor %u -> %u (min level during warm-up)",
+             level, static_cast<unsigned>(BURNOUT_MIN_LEVEL));
+    level = static_cast<int>(BURNOUT_MIN_LEVEL);
   }
 
   uint8_t new_level = static_cast<uint8_t>(level);
