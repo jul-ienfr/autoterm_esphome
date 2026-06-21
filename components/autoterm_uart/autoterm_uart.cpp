@@ -1603,12 +1603,21 @@ void AutotermUART::check_startup_voltage_(float voltage, uint16_t status_code) {
     return;
   }
 
-  if (std::isfinite(voltage) && voltage < SAFETY_MIN_STARTUP_VOLTAGE_V) {
-    if (startup_voltage_ok_) {
-      startup_voltage_ok_ = false;
-      ESP_LOGE("autoterm_uart",
-               "STARTUP VOLTAGE LOW: %.1fV < %.1fV — glow plug may fail, start may abort",
-               voltage, SAFETY_MIN_STARTUP_VOLTAGE_V);
+  if (std::isfinite(voltage)) {
+    if (voltage < SAFETY_MIN_STARTUP_VOLTAGE_V) {
+      if (startup_voltage_ok_) {
+        startup_voltage_ok_ = false;
+        ESP_LOGE("autoterm_uart",
+                 "STARTUP VOLTAGE LOW: %.1fV < %.1fV — glow plug may fail, start may abort. "
+                 "REDUCE ELECTRICAL LOADS (lights, fridge, etc.)",
+                 voltage, SAFETY_MIN_STARTUP_VOLTAGE_V);
+      }
+    } else if (voltage < 11.0f && startup_voltage_ok_) {
+      // Warning at 11V: not critical but suggests reducing loads
+      ESP_LOGW("autoterm_uart",
+               "STARTUP VOLTAGE WARNING: %.1fV — consider reducing electrical loads "
+               "(glow plug draws 3-5A during ignition)",
+               voltage);
     }
   }
 }
