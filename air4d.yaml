@@ -14,11 +14,11 @@ esp32:
       CONFIG_ESP32_DEFAULT_CPU_FREQ_160: y  # 160MHz suffisant pour UART 9600 baud (économie ~20-30mA)
       # Automatic power management: CPU light-sleep when idle (économie ~50-80mA en veille)
       CONFIG_PM_ENABLE: y
-      CONFIG_PM_DFS_INIT_FREQ: 40  # CPU à 40MHz en idle (suffisant pour UART 9600, économie maximale)
-      CONFIG_PM_DFS_MAX: 160       # CPU à 160MHz max en charge
+      CONFIG_PM_DFS_INIT_FREQ: "40"  # CPU à 40MHz en idle (suffisant pour UART 9600, économie maximale)
+      CONFIG_PM_DFS_MAX: "160"       # CPU à 160MHz max en charge
       # Watchdog matériel: redémarrage auto si blocage logiciel
       CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0: y
-      CONFIG_ESP_TASK_WDT_TIMEOUT_S: 30
+      CONFIG_ESP_TASK_WDT_TIMEOUT_S: "30"
 
 # IMPORTANT: Utilise le code local amélioré (avec fix pointeurs + monitoring CRC)
 # Structure de dossiers requise:
@@ -62,10 +62,11 @@ api:
 ota:
   - platform: esphome
     password: !secret ota_password
-    # Safe mode: rollback automatique après 5 échecs de démarrage
-    safe_mode: true
     # Port custom si besoin (évite conflit si plusieurs ESP)
     # port: 3232
+
+# Safe mode: rollback automatique après 5 échecs de démarrage
+safe_mode:
 
 # Wifi avec fallback robuste
 wifi:
@@ -74,7 +75,7 @@ wifi:
 
   # Optimisations connexion
   fast_connect: true  # Reconnexion rapide au dernier AP
-  power_save_mode: min_modem  # WiFi sleep entre les beacons (économie ~10-20mA)
+  power_save_mode: light  # WiFi sleep entre les beacons (économie ~10-20mA)
   # Réduire puissance TX si signal fort (économie ~30mA)
   output_power: 17dB  # Réduit de 20dB à 17dB = économie ~30mA quand le signal est bon
 
@@ -171,6 +172,7 @@ sensor:
 
 # Configuration Autoterm UART (améliorée)
 autoterm_uart:
+  id: autoterm
   # IDs UART
   uart_display_id: uart_panel
   uart_heater_id: uart_heater
@@ -329,17 +331,52 @@ autoterm_uart:
   maintenance_oil:
     name: "Maintenance: Oil Change"
     icon: "mdi:oil"
-    device_class: problem
 
   maintenance_filter:
     name: "Maintenance: Filter Clean"
     icon: "mdi:air-filter"
-    device_class: problem
 
   maintenance_glow:
     name: "Maintenance: Glow Plug"
     icon: "mdi:lightning-bolt"
-    device_class: problem
+
+  # Maintenance counters: hours since last reset / hours remaining
+  maintenance_oil_since:
+    name: "Maintenance: Combustion Since"
+    icon: "mdi:oil"
+    unit_of_measurement: "h"
+    accuracy_decimals: 1
+    state_class: measurement
+  maintenance_oil_remaining:
+    name: "Maintenance: Combustion Remaining"
+    icon: "mdi:oil"
+    unit_of_measurement: "h"
+    accuracy_decimals: 1
+    state_class: measurement
+  maintenance_filter_since:
+    name: "Maintenance: Fuel Filter Since"
+    icon: "mdi:air-filter"
+    unit_of_measurement: "h"
+    accuracy_decimals: 1
+    state_class: measurement
+  maintenance_filter_remaining:
+    name: "Maintenance: Fuel Filter Remaining"
+    icon: "mdi:air-filter"
+    unit_of_measurement: "h"
+    accuracy_decimals: 1
+    state_class: measurement
+  maintenance_glow_since:
+    name: "Maintenance: Glow Plug Since"
+    icon: "mdi:lightning-bolt"
+    unit_of_measurement: "h"
+    accuracy_decimals: 1
+    state_class: measurement
+  maintenance_glow_remaining:
+    name: "Maintenance: Glow Plug Remaining"
+    icon: "mdi:lightning-bolt"
+    unit_of_measurement: "h"
+    accuracy_decimals: 1
+    state_class: measurement
 
   # Score d'usure brûleur (100% = neuf, <70% = nettoyage nécessaire)
   wear_score:
@@ -537,6 +574,17 @@ autoterm_uart:
   status_report_button:
     name: "Status Report"
     icon: "mdi:file-document-edit"
+
+  # Maintenance reset buttons (mark maintenance as done)
+  reset_maintenance_oil:
+    name: "Reset Combustion Cleaning"
+    icon: "mdi:oil"
+  reset_maintenance_filter:
+    name: "Reset Fuel Filter"
+    icon: "mdi:air-filter"
+  reset_maintenance_glow:
+    name: "Reset Glow Plug"
+    icon: "mdi:lightning-bolt"
 
   # CO sensor (SAVES LIVES — carbon monoxide detection)
   # ⚠️ Requiert capteur MQ-7 ou détecteur CO dédié sur GPIO34

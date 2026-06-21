@@ -22,6 +22,9 @@ AutotermTempSourceSelect = autoterm_ns.class_("AutotermTempSourceSelect", select
 AutotermUnlockButton = autoterm_ns.class_("AutotermUnlockButton", button.Button)
 AutotermPrimePumpButton = autoterm_ns.class_("AutotermPrimePumpButton", button.Button)
 AutotermStatusReportButton = autoterm_ns.class_("AutotermStatusReportButton", button.Button)
+AutotermResetOilButton = autoterm_ns.class_("AutotermResetOilButton", button.Button)
+AutotermResetFilterButton = autoterm_ns.class_("AutotermResetFilterButton", button.Button)
+AutotermResetGlowButton = autoterm_ns.class_("AutotermResetGlowButton", button.Button)
 
 CONF_CLIMATE = "climate"
 CONF_DEFAULT_LEVEL = "default_level"
@@ -48,6 +51,15 @@ CONF_MAINTENANCE_OIL_HRS = "maintenance_oil_hours"
 CONF_MAINTENANCE_FILTER_HRS = "maintenance_filter_hours"
 CONF_MAINTENANCE_GLOW_HRS = "maintenance_glow_hours"
 CONF_BURN_CYCLE_INTERVAL_HRS = "burn_cycle_interval_hours"
+CONF_MAINTENANCE_OIL_SINCE = "maintenance_oil_since"
+CONF_MAINTENANCE_OIL_REMAINING = "maintenance_oil_remaining"
+CONF_MAINTENANCE_FILTER_SINCE = "maintenance_filter_since"
+CONF_MAINTENANCE_FILTER_REMAINING = "maintenance_filter_remaining"
+CONF_MAINTENANCE_GLOW_SINCE = "maintenance_glow_since"
+CONF_MAINTENANCE_GLOW_REMAINING = "maintenance_glow_remaining"
+CONF_RESET_OIL_BUTTON = "reset_maintenance_oil"
+CONF_RESET_FILTER_BUTTON = "reset_maintenance_filter"
+CONF_RESET_GLOW_BUTTON = "reset_maintenance_glow"
 CONF_FUEL_ECONOMY = "fuel_economy"
 CONF_FUEL_ECONOMY_REACTIVE = "fuel_economy_reactive"
 CONF_PREDICTION = "prediction"
@@ -170,17 +182,52 @@ CONFIG_SCHEMA = cv.Schema({
     ),
     cv.Optional(CONF_MAINTENANCE_OIL): sensor.sensor_schema(
         icon="mdi:oil",
-        device_class=const.DEVICE_CLASS_PROBLEM,
         state_class=const.STATE_CLASS_MEASUREMENT,
     ),
     cv.Optional(CONF_MAINTENANCE_FILTER): sensor.sensor_schema(
         icon="mdi:air-filter",
-        device_class=const.DEVICE_CLASS_PROBLEM,
         state_class=const.STATE_CLASS_MEASUREMENT,
     ),
     cv.Optional(CONF_MAINTENANCE_GLOW): sensor.sensor_schema(
         icon="mdi:lightning-bolt",
-        device_class=const.DEVICE_CLASS_PROBLEM,
+        state_class=const.STATE_CLASS_MEASUREMENT,
+    ),
+
+    # Maintenance counter sensors (hours since last reset / hours remaining)
+    cv.Optional(CONF_MAINTENANCE_OIL_SINCE): sensor.sensor_schema(
+        unit_of_measurement="h",
+        icon="mdi:oil",
+        accuracy_decimals=1,
+        state_class=const.STATE_CLASS_MEASUREMENT,
+    ),
+    cv.Optional(CONF_MAINTENANCE_OIL_REMAINING): sensor.sensor_schema(
+        unit_of_measurement="h",
+        icon="mdi:oil",
+        accuracy_decimals=1,
+        state_class=const.STATE_CLASS_MEASUREMENT,
+    ),
+    cv.Optional(CONF_MAINTENANCE_FILTER_SINCE): sensor.sensor_schema(
+        unit_of_measurement="h",
+        icon="mdi:air-filter",
+        accuracy_decimals=1,
+        state_class=const.STATE_CLASS_MEASUREMENT,
+    ),
+    cv.Optional(CONF_MAINTENANCE_FILTER_REMAINING): sensor.sensor_schema(
+        unit_of_measurement="h",
+        icon="mdi:air-filter",
+        accuracy_decimals=1,
+        state_class=const.STATE_CLASS_MEASUREMENT,
+    ),
+    cv.Optional(CONF_MAINTENANCE_GLOW_SINCE): sensor.sensor_schema(
+        unit_of_measurement="h",
+        icon="mdi:lightning-bolt",
+        accuracy_decimals=1,
+        state_class=const.STATE_CLASS_MEASUREMENT,
+    ),
+    cv.Optional(CONF_MAINTENANCE_GLOW_REMAINING): sensor.sensor_schema(
+        unit_of_measurement="h",
+        icon="mdi:lightning-bolt",
+        accuracy_decimals=1,
         state_class=const.STATE_CLASS_MEASUREMENT,
     ),
 
@@ -355,6 +402,20 @@ CONFIG_SCHEMA = cv.Schema({
         icon="mdi:file-document-edit",
     ),
 
+    # Maintenance reset buttons
+    cv.Optional(CONF_RESET_OIL_BUTTON): button.button_schema(
+        class_=AutotermResetOilButton,
+        icon="mdi:oil",
+    ),
+    cv.Optional(CONF_RESET_FILTER_BUTTON): button.button_schema(
+        class_=AutotermResetFilterButton,
+        icon="mdi:air-filter",
+    ),
+    cv.Optional(CONF_RESET_GLOW_BUTTON): button.button_schema(
+        class_=AutotermResetGlowButton,
+        icon="mdi:lightning-bolt",
+    ),
+
     # Extended protocol: diagnostic mode
     cv.Optional(CONF_DIAGNOSTIC_MODE, default=False): cv.boolean,
 
@@ -513,10 +574,8 @@ async def to_code(config):
 
     # Extended protocol: unlock button
     if CONF_UNLOCK_BUTTON in config:
-        btn_conf = config[CONF_UNLOCK_BUTTON]
-        btn = await button.new_button(btn_conf)
+        btn = await button.new_button(config[CONF_UNLOCK_BUTTON])
         cg.add(btn.set_parent(var))
-        await cg.register_component(btn, config)
 
     # Extended protocol: prime pump button
     if CONF_PRIME_PUMP_BUTTON in config:
@@ -524,14 +583,34 @@ async def to_code(config):
         btn = await button.new_button(btn_conf)
         cg.add(btn.set_parent(var))
         cg.add(btn.set_frequency(btn_conf[CONF_PRIME_PUMP_FREQUENCY]))
-        await cg.register_component(btn, config)
 
     # Extended protocol: status report button
     if CONF_STATUS_REPORT_BUTTON in config:
-        btn_conf = config[CONF_STATUS_REPORT_BUTTON]
-        btn = await button.new_button(btn_conf)
+        btn = await button.new_button(config[CONF_STATUS_REPORT_BUTTON])
         cg.add(btn.set_parent(var))
-        await cg.register_component(btn, config)
+
+    # Maintenance counter sensors
+    for key, setter in [
+        (CONF_MAINTENANCE_OIL_SINCE, "set_maintenance_oil_since_sensor"),
+        (CONF_MAINTENANCE_OIL_REMAINING, "set_maintenance_oil_remaining_sensor"),
+        (CONF_MAINTENANCE_FILTER_SINCE, "set_maintenance_filter_since_sensor"),
+        (CONF_MAINTENANCE_FILTER_REMAINING, "set_maintenance_filter_remaining_sensor"),
+        (CONF_MAINTENANCE_GLOW_SINCE, "set_maintenance_glow_since_sensor"),
+        (CONF_MAINTENANCE_GLOW_REMAINING, "set_maintenance_glow_remaining_sensor"),
+    ]:
+        if key in config:
+            sens = await sensor.new_sensor(config[key])
+            cg.add(getattr(var, setter)(sens))
+
+    # Maintenance reset buttons
+    for key, cls in [
+        (CONF_RESET_OIL_BUTTON, AutotermResetOilButton),
+        (CONF_RESET_FILTER_BUTTON, AutotermResetFilterButton),
+        (CONF_RESET_GLOW_BUTTON, AutotermResetGlowButton),
+    ]:
+        if key in config:
+            btn = await button.new_button(config[key])
+            cg.add(btn.set_parent(var))
 
     # Extended protocol: diagnostic mode
     if CONF_DIAGNOSTIC_MODE in config:
