@@ -12,9 +12,9 @@ Pont UART bidirectionnel entre les chauffages diesel **Autoterm/Planar** et leur
 ## 📦 Fonctionnalités
 
 - 🧭 **Bridge UART bidirectionnelle** entre panneau et chauffage
-- 📊 **33+ capteurs** : températures, tension, pompe, carburant, usure, efficacité, diagnostic...
+- 📊 **35+ capteurs** : températures, tension, pompe, carburant, usure, efficacité, diagnostic, CO, altitude...
 - 🌡️ **Climate avec presets** : chauffage, auto, ventilation, thermostat, mode puissance
-- 🔴 **6 protections sécurité** : surtempérature, flameout, sous-tension, burn-out, lockout, watchdog
+- 🔴 **7 protections sécurité** : surtempérature, flameout, sous-tension, burn-out, lockout, watchdog, CO
 - 🟢 **Eco-Adaptive** ⭐ : mode continu sans on/off, feed-forward anti-dépassement
 - 🟡 **PID Gain-Scheduled** : gains par phase (startup/approaching/steady) = -15-20% carburant
 - 🟡 **Antifreeze zones** : 4 zones de puissance asymétriques au lieu de on/off
@@ -24,8 +24,13 @@ Pont UART bidirectionnel entre les chauffages diesel **Autoterm/Planar** et leur
 - 🟡 **Prédiction intelligente** : apprentissage des patterns horaires
 - 🟢 **10 modes** : eco-adaptive, PID, hystérésis, puissance, ventilation, nuit, frost, economy, sleep, autonomous
 - 🔌 **Protocole étendu** : diagnostic mode, unlock error 37, version firmware, historique, status report
-- 🛡️ **Burn-out protection** : 4 min post-ignition sans arrêt
-- 📊 **Fuel tracking** : consommation instantanée, totale, et quotidienne
+- 🛡️ **Burn-out protection** : 4 min post-ignition sans arrêt (minimum power level 3)
+- 🔴 **CO sensor** : détection monoxyde de carbone (MQ-7), arrêt urgence > 35 ppm
+- 🌊 **Altitude compensation** : compensation densité air via GPS HA (> 1000m)
+- 📊 **Shutdown monitoring** : suivi séquence purge, timeout 5 min
+- 🌡️ **Exhaust alerts** : alertes surtempérature échappement et derivatives
+- ⏱️ **Runtime accuracy** : suivi heures fonctionnement persisté NVS, précision session
+- 📊 **Fuel tracking** : consommation instantanée, totale, quotidienne, et daily reset
 - 🛰️ **Dashboard HTML** : interface web avec graphiques temps réel
 - 🏠 **19 automatisations HA** : alertes, maintenance, confort, énergie, lockout, eco-adaptive
 - 🔧 **Script Arduino** : test UART avec 11 commandes
@@ -54,15 +59,17 @@ Projet_Autoterm/
 
 ---
 
-## 🔴 Sécurité (5 protections)
+## 🔴 Sécurité (7 protections)
 
 | Protection | Seuil | Action |
 |------------|-------|--------|
 | Surtempérature échappement | > 400°C | Arrêt immédiat |
-| Flameout (pompe active + T basse) | < 100°C / 60s | Coupe carburant |
-| Tension démarrage basse | < 10V pendant ignition | Alerte ERROR |
+| Flameout (pompe active + T basse) | < 100°C / 90s | Coupe carburant (2 lectures confirmées) |
+| Tension démarrage basse | < 10V pendant ignition | Alerte ERROR (2 lectures confirmées) |
 | Tension critique opération | < 9.0V | Arrêt immédiat |
 | Watchdog matériel | 30s | Redémarrage auto |
+| CO (monoxyde de carbone) | > 35 ppm / 3 lectures | Arrêt urgence (sauve vies) |
+| Altitude compensation | > 1000m | Réduction niveau max (suicide air raréfié) |
 
 ---
 
@@ -107,7 +114,7 @@ Module la puissance (niveaux 1-9) proportionnellement à l'erreur de températur
 
 ---
 
-## 🟡 Capteurs (33+)
+## 🟡 Capteurs (35+)
 
 | Capteur | Unité | Description |
 |---------|-------|-------------|
@@ -127,6 +134,8 @@ Module la puissance (niveaux 1-9) proportionnellement à l'erreur de températur
 | `wear_score` | % | Score usure brûleur |
 | `fuel_economy_savings` | % | Temps près de la cible |
 | `predicted_temp` | °C | Température prédite |
+| `runtime_hours` | h | Heures fonctionnement (persisté NVS) |
+| `session_runtime` | h | Durée session actuelle |
 | `boot_count` | — | Nombre de boots ESP32 |
 | `free_heap` | B | Mémoire libre |
 | `error_code` | — | Code erreur (byte 2 status) |
@@ -134,6 +143,9 @@ Module la puissance (niveaux 1-9) proportionnellement à l'erreur de températur
 | `glow_plug_current` | % | Courant bougie préchauffage (diagnostic) |
 | `chamber_temp` | °C | T° chambre combustion (diagnostic) |
 | `board_temp` | °C | T° carte ECU (diagnostic) |
+| `co_level` | ppm | Niveau CO (MQ-7, urgence > 35 ppm) |
+| `gps_altitude` | m | Altitude GPS (compensation densité air) |
+| `exhaust_temp_direct` | °C | T° échappement directe (thermocouple K) |
 
 ### Capteurs optionnels (hardware externe)
 
@@ -161,7 +173,7 @@ Module la puissance (niveaux 1-9) proportionnellement à l'erreur de températur
 | **Pre-heating** | Anticipe les chutes de T° par prédiction horaire |
 | **Fuel Economy** | Tracking + réduction proactive |
 | **Light Sleep** | Réduit consommation en veille |
-| **Burn-out** | Protection 4 min post-ignition |
+| **Burn-out** | Protection 4 min post-ignition (niveau min 3, pas de flameout check) |
 | **Autonomous** | Fonctionne sans panneau physique |
 
 ---
@@ -171,8 +183,8 @@ Module la puissance (niveaux 1-9) proportionnellement à l'erreur de températur
 | Type | Nom | Description |
 |------|-----|-------------|
 | Climate | Heating | Thermostat complet avec presets |
-| Sensor | 33+ capteurs | Voir tableau ci-dessus |
-| Text Sensor | error_text, firmware_version, error_log, eco_mode_status | Infos texte |
+| Sensor | 35+ capteurs | Voir tableau ci-dessus |
+| Text Sensor | error_text, firmware_version, error_log, eco_mode_status, reset_reason | Infos texte |
 | Switch | Night Mode | Mode nuit on/off |
 | Switch | Frost Protection | Protection anti-gel on/off |
 | Switch | Debug Mode | Logs DEBUG à chaud |
@@ -181,6 +193,7 @@ Module la puissance (niveaux 1-9) proportionnellement à l'erreur de températur
 | Button | Clear Lockout | Déverrouille error 37 + état urgence |
 | Button | Prime Fuel Pump | Amorce pompe carburant |
 | Button | Status Report | Snapshot diagnostic complet en 1 clic |
+| Button | Reset Oil / Filter / Glow | Reset maintenance counters |
 | Select | Temperature Source | Source de régulation (Int/Panel/Ext/HA) |
 
 ---
@@ -329,6 +342,16 @@ La documentation la plus complète se trouve dans le repo **kalutep** :
 - [`serial_communication_protocol.md`](https://github.com/kalutep/AutotermHeaterController/blob/main/serial_communication_protocol.md) — Spec complète avec tous les status codes, error codes, et le format du diagnostic telemetry (72 octets)
 - [`messages/`](https://github.com/kalutep/AutotermHeaterController/tree/main/messages) — Captures de messages bruts
 - [`message_captures/`](https://github.com/kalutep/AutotermHeaterController/tree/main/message_captures) — Logs du mode diagnostic avec le logiciel Autoterm Test v1.11
+
+### Références scientifiques
+
+| Auteur | Sujet | Application dans le projet |
+|--------|-------|---------------------------|
+| Andrych-Zalewska et al. | Efficacité combustion diesel basse puissance | Modèle `combustion_efficiency` : ratio T_echappement / T_chambre pour estimer l'eta thermique |
+| Miklnik et al. | Optimization of air-heating systems | Eco-Adaptive mode : régulation continue sans on/off, gains PID par phase |
+| Autoterm / Planar | Documentation fabricant (service manual) | Codes status (0x0300-0x0400), codes erreur (17 codes), séquence shutdown |
+| ISO 12039 | Émissions diesel particules | Seuils CO et suie : calibration capteur MQ-7 (> 35 ppm = danger) |
+| SAE J1349 | Correction altitude moteurs diesel | Compensation altitude : facteur densité air en fonction de l'altitude GPS |
 
 ---
 

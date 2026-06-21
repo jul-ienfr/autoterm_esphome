@@ -805,13 +805,28 @@ void AutotermUART::track_ignition_time_(uint16_t status_code, uint32_t now) {
   if (is_heating && !burnout_protection_active_) {
     burnout_protection_active_ = true;
     burnout_start_ms_ = now;
-    ESP_LOGI("autoterm_uart", "Burn-out protection: active for 4 minutes");
+    ESP_LOGI("autoterm_uart", "Burn-out protection: active (min %.0fs, exh > %.0f°C or max 4min)",
+             BURNOUT_MIN_TIME_MS / 1000.0f, BURNOUT_MIN_TEMP_C);
   }
 
-  // Deactivate burn-out protection after 4 minutes
-  if (burnout_protection_active_ && (now - burnout_start_ms_) > BURNOUT_PROTECTION_MS) {
-    burnout_protection_active_ = false;
-    ESP_LOGI("autoterm_uart", "Burn-out protection: expired (4 minutes elapsed)");
+  // Deactivate burn-out protection when:
+  //   - Exhaust temp > 200°C AND time > 2 minutes (chamber is warm enough), OR
+  //   - Max 4 minutes elapsed (safety cap regardless of temperature)
+  if (burnout_protection_active_) {
+    uint32_t burnout_elapsed = now - burnout_start_ms_;
+    bool temp_ready = std::isfinite(last_exhaust_temp_c_) && last_exhaust_temp_c_ > BURNOUT_MIN_TEMP_C;
+    bool min_time_elapsed = burnout_elapsed > BURNOUT_MIN_TIME_MS;
+    bool max_time_elapsed = burnout_elapsed > BURNOUT_PROTECTION_MS;
+
+    if (max_time_elapsed) {
+      burnout_protection_active_ = false;
+      ESP_LOGI("autoterm_uart", "Burn-out protection: expired (max 4min, exh=%.0f°C)",
+               last_exhaust_temp_c_);
+    } else if (min_time_elapsed && temp_ready) {
+      burnout_protection_active_ = false;
+      ESP_LOGI("autoterm_uart", "Burn-out protection: ended (%.0fs, exh=%.0f°C > %.0f°C)",
+               burnout_elapsed / 1000.0f, last_exhaust_temp_c_, BURNOUT_MIN_TEMP_C);
+    }
   }
 
   // Stop tracking when heating begins or ignition ends
@@ -1511,7 +1526,7 @@ void AutotermUART::check_emergency_shutdown_(float heater_temp, float voltage, u
     return;
   }
 
-  // 2. During burn-out protection (first 4 min after ignition), only critical over-temp triggers shutdown
+  // 2. During burn-out protection (until exhaust > 200°C and time > 2min, max 4min), only critical over-temp triggers shutdown
   // Voltage dips and flameout are suppressed to prevent damage from incomplete combustion
   if (burnout_protection_active_) {
     static uint32_t last_burnout_log = 0;

@@ -19,6 +19,8 @@ Guide pas-à-pas pour installer et configurer le pont UART Autoterm avec ESPHome
 
 ### Capteurs optionnels (recommandés)
 
+> **Ce que le fabricant recommande** : L'Autoterm Air 4D est conçu pour fonctionner avec ses capteurs internes (T° échappement, interne, externe, chambre combustion, tension, ventilateur, pompe). Ces capteurs remontent via le protocole UART et sont **suffisants** pour un usage normal. Les capteurs ci-dessous sont des **améliorations** pour les utilisateurs avancés qui veulent plus de sécurité ou de précision.
+
 > ⚠️ **Le chauffage Autoterm a déjà des capteurs intégrés** (T° échappement, interne, externe, chambre combustion, tension, ventilateur, pompe). Ces capteurs optionnels améliorent le système mais ne sont pas nécessaires.
 
 | Composant | Prix | Utilité | Priorité |
@@ -28,6 +30,31 @@ Guide pas-à-pas pour installer et configurer le pont UART Autoterm avec ESPHome
 | **Thermocouple K + MAX6675** | ~5€ | T° échappement plus précise | Optionnel |
 
 **Total avec CO sensor: ~18-23€**
+
+### Ce que le fabricant recommande
+
+Le fabricant Autoterm/Planar recommande :
+1. **Alimentation stable** : fusible 15A, câbles 6mm² minimum, batterie > 12V au repos
+2. **Ne jamais couper l'alimentation** pendant la séquence de purge (5 min après arrêt)
+3. **Gardez le panneau d'origine** connecté en parallèle pendant les tests initiaux
+4. **Vérifiez les câbles UART** : les fils lâches causent des erreurs CRC et des arrêts intempestifs
+5. **Ne pas modifier le firmware** du heater — l'ESP32 est un pont, pas un remplaçant de l'ECU
+
+### Bonnes pratiques de démarrage et d'arrêt
+
+#### Démarrage
+1. Vérifier la tension batterie (> 12V) avant de démarrer
+2. Laisser le panneau afficher "Standby" avant d'envoyer une commande
+3. Ne pas démarrer si T° échappement > 100°C (refroidir d'abord)
+4. Le premier démarrage après installation : surveiller les 5 premières minutes dans les logs
+5. Activer le mode diagnostic (`diagnostic_mode: true`) les premiers jours pour valider le bon fonctionnement
+
+#### Arrêt
+1. **Ne jamais débrancher l'alimentation** pendant la séquence de purge (5 min)
+2. La séquence de purge est : `0x0300` (heating) → `0x0304` (cooling) → `0x0305` (idle vent) → `0x0400` (shutdown)
+3. Le ventilateur continue de tourner après l'arrêt du brûleur — c'est normal (refroidissement échangeur)
+4. L'ESP32 détecte automatiquement la fin de purge et arrête le monitoring
+5. En cas d'urgence : appuyer sur "Clear Lockout" dans HA puis redémarrer le ESP32
 
 ---
 
@@ -469,13 +496,14 @@ Commandes disponibles :
 |----------|--------|
 | Consommation ESP32 (veille, heater off) | ~50-70mA ⚡ |
 | Consommation ESP32 (WiFi actif) | ~140-150mA |
-| CPU | 160MHz (auto PM: 80MHz idle) |
+| CPU | 160MHz (auto PM: 40MHz idle) |
 | Latence capteurs | 2 secondes |
 | Taille firmware | ~450KB |
 | Mémoire libre | ~180KB |
-| Nombre capteurs | 25+ |
-| Modes de chauffage | 6 (Eco-Adaptive, PID, Hystérésis, Puissance, Ventilation, Auto) |
+| Nombre capteurs | 35+ (25 internes UART + 5 diagnostics + 3 optionnels + 2 HA) |
+| Modes de chauffage | 10 (Eco-Adaptive, PID, Hystérésis, Puissance, Ventilation, Nuit, Frost, Economy, Sleep, Autonomous) |
 | Commandes protocole | 13 (toutes documentées dans modie.md) |
+| protections sécurité | 7 (surtempérature, flameout, sous-tension, burn-out, lockout, watchdog, CO) |
 
 ---
 

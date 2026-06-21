@@ -501,16 +501,19 @@ class AutotermUART : public Component {
   // Safety: startup voltage check
   bool startup_voltage_ok_{true};
 
-  // Burn-out protection: prevent shutdown during first 4 minutes after ignition
+  // Burn-out protection: prevent shutdown until combustion chamber is warm
   bool burnout_protection_active_{false};
   uint32_t burnout_start_ms_{0};
-  static constexpr uint32_t BURNOUT_PROTECTION_MS = 240000;  // 4 minutes
+  static constexpr uint32_t BURNOUT_PROTECTION_MS = 240000;  // 4 minutes max (safety cap)
+  static constexpr float BURNOUT_MIN_TEMP_C = 200.0f;        // Exhaust must exceed this for complete combustion
+  static constexpr uint32_t BURNOUT_MIN_TIME_MS = 120000;    // 2 minutes minimum before burnout can end
   static constexpr uint8_t BURNOUT_MIN_LEVEL = 3;  // Minimum power level during burnout (ensures complete combustion)
 
-  // Shutdown monitoring: track purge fan sequence
+  // Shutdown monitoring: track purge fan via exhaust temperature
   bool shutdown_monitoring_active_{false};
   uint32_t shutdown_start_ms_{0};
-  static constexpr uint32_t SHUTDOWN_PURGE_TIMEOUT_MS = 300000;  // 5 minutes max purge time
+  static constexpr uint32_t SHUTDOWN_PURGE_TIMEOUT_MS = 300000;  // 5 minutes max safety timeout
+  static constexpr float SHUTDOWN_TARGET_TEMP_C = 100.0f;        // Exhaust below this = purge complete
 
   // Minimum run time: prevent rapid cycling (extends glow plug and fuel pump life)
   uint32_t heater_stopped_ms_{0};
@@ -757,16 +760,20 @@ class AutotermUART : public Component {
     // CO sensor check (SAVES LIVES — runs on every loop)
     check_co_level_();
 
-    // Shutdown monitoring: track purge fan sequence
+    // Shutdown monitoring: track purge fan via exhaust temperature
     if (shutdown_monitoring_active_) {
       uint32_t shutdown_elapsed = now - shutdown_start_ms_;
-      if (shutdown_elapsed > SHUTDOWN_PURGE_TIMEOUT_MS) {
-        ESP_LOGW("autoterm_uart", "Shutdown: purge fan timeout (%.0fs > 5min) — fan possibly stuck",
-                 shutdown_elapsed / 1000.0f);
+      bool max_timeout = shutdown_elapsed > SHUTDOWN_PURGE_TIMEOUT_MS;
+      bool temp_cooled = std::isfinite(last_exhaust_temp_c_) && last_exhaust_temp_c_ < SHUTDOWN_TARGET_TEMP_C;
+
+      if (max_timeout) {
+        ESP_LOGW("autoterm_uart", "Shutdown: max timeout reached (%.0fs), exhaust=%.0f°C",
+                 shutdown_elapsed / 1000.0f, last_exhaust_temp_c_);
         shutdown_monitoring_active_ = false;
-      } else if (!heater_running_ && shutdown_elapsed > 10000) {
-        // Heater has fully stopped and purge completed
-        ESP_LOGI("autoterm_uart", "Shutdown: purge fan completed in %.0fs", shutdown_elapsed / 1000.0f);
+      } else if (!heater_running_ && shutdown_elapsed > 10000 && temp_cooled) {
+        // Heater stopped, purge ran, and exhaust below target temperature
+        ESP_LOGI("autoterm_uart", "Shutdown: purge complete in %.0fs (exhaust=%.0f°C < %.0f°C)",
+                 shutdown_elapsed / 1000.0f, last_exhaust_temp_c_, SHUTDOWN_TARGET_TEMP_C);
         shutdown_monitoring_active_ = false;
       }
     }
