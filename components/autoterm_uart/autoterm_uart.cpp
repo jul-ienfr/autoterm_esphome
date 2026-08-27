@@ -140,6 +140,31 @@ void AutotermFanLevelNumber::control(float value) {
   if (parent_) parent_->send_fan_mode(true, (int)value);
 }
 
+void AutotermTunableNumber::control(float value) {
+  publish_state(value);
+  if (parent_) parent_->apply_tunable_(kind_, value);
+}
+
+void AutotermUART::apply_tunable_(AutotermTunableNumber::Kind k, float v) {
+  switch (k) {
+    case AutotermTunableNumber::Kind::PID_KP: pid_kp_ = std::max(0.1f, std::min(v, 10.0f)); break;
+    case AutotermTunableNumber::Kind::PID_KI: pid_ki_ = std::max(0.0f, std::min(v, 5.0f)); break;
+    case AutotermTunableNumber::Kind::PID_KD: pid_kd_ = std::max(0.0f, std::min(v, 2.0f)); break;
+    case AutotermTunableNumber::Kind::ECO_KP: eco_kp_ = std::max(0.1f, std::min(v, 10.0f)); break;
+    case AutotermTunableNumber::Kind::ECO_KI: eco_ki_ = std::max(0.0f, std::min(v, 5.0f)); break;
+    case AutotermTunableNumber::Kind::ECO_KD: eco_kd_ = std::max(0.0f, std::min(v, 2.0f)); break;
+    case AutotermTunableNumber::Kind::ECO_DEADBAND: eco_deadband_ = std::max(0.0f, std::min(v, 2.0f)); break;
+  }
+  // Reset integral to avoid windup bump on gain change
+  if (k == AutotermTunableNumber::Kind::PID_KP || k == AutotermTunableNumber::Kind::PID_KI ||
+      k == AutotermTunableNumber::Kind::PID_KD) {
+    pid_integral_ = 0.0f;
+  } else {
+    eco_integral_ = 0.0f;
+  }
+  ESP_LOGI("autoterm_uart", "Tunable %d set to %.3f", (int)k, v);
+}
+
 // ===================
 // AutotermTempSourceSelect implementations
 // ===================

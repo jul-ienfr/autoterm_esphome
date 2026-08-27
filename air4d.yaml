@@ -539,6 +539,39 @@ autoterm_uart:
     name: "Error Log"
     icon: "mdi:file-document-alert"
 
+  # ===== RUNTIME-TUNABLE NUMBERS (PID / Eco gains sans recompiler) =====
+  # Chaque number expose un gain en HA ; modifier la valeur applique immédiatement via apply_tunable_
+  # (avec clamp et reset intégral anti-windup). Optionnel — ne déclare que ceux souhaités.
+  # Plages imposées par le composant (non modifiables en YAML) — voir __init__.py.
+  tune_pid_kp:
+    name: "Tune PID Kp"
+    icon: "mdi:tune"
+    mode: slider
+  tune_pid_ki:
+    name: "Tune PID Ki"
+    icon: "mdi:tune"
+    mode: slider
+  tune_pid_kd:
+    name: "Tune PID Kd"
+    icon: "mdi:tune"
+    mode: slider
+  tune_eco_kp:
+    name: "Tune Eco Kp"
+    icon: "mdi:tune-variant"
+    mode: slider
+  tune_eco_ki:
+    name: "Tune Eco Ki"
+    icon: "mdi:tune-variant"
+    mode: slider
+  tune_eco_kd:
+    name: "Tune Eco Kd"
+    icon: "mdi:tune-variant"
+    mode: slider
+  tune_eco_deadband:
+    name: "Tune Eco Deadband"
+    icon: "mdi:thermometer-probe"
+    mode: slider
+
   # ===== ECO-ADAPTIVE SENSORS =====
   eco_adaptive_level:
     name: "Eco-Adaptive Level"

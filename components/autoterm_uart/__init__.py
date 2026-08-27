@@ -16,6 +16,7 @@ AUTO_LOAD = ["sensor", "text_sensor", "number", "climate", "select", "button"]
 
 autoterm_ns = cg.esphome_ns.namespace("autoterm_uart")
 AutotermFanLevelNumber = autoterm_ns.class_("AutotermFanLevelNumber", number.Number)
+AutotermTunableNumber = autoterm_ns.class_("AutotermTunableNumber", number.Number)
 AutotermUART = autoterm_ns.class_("AutotermUART", cg.Component)
 AutotermClimate = autoterm_ns.class_("AutotermClimate", climate.Climate)
 AutotermTempSourceSelect = autoterm_ns.class_("AutotermTempSourceSelect", select.Select)
@@ -90,6 +91,14 @@ CONF_ECO_MODE_STATUS = "eco_mode_status"
 CONF_GLOW_PLUG_CURRENT = "glow_plug_current"
 CONF_CHAMBER_TEMP = "chamber_temp"
 CONF_BOARD_TEMP = "board_temp"
+# Runtime-tunable numbers (PID / Eco) — map to AutotermTunableNumber Kind
+CONF_TUNE_PID_KP = "tune_pid_kp"
+CONF_TUNE_PID_KI = "tune_pid_ki"
+CONF_TUNE_PID_KD = "tune_pid_kd"
+CONF_TUNE_ECO_KP = "tune_eco_kp"
+CONF_TUNE_ECO_KI = "tune_eco_ki"
+CONF_TUNE_ECO_KD = "tune_eco_kd"
+CONF_TUNE_ECO_DEADBAND = "tune_eco_deadband"
 
 TEMP_SOURCE_OPTIONS = ["Internal", "Panel", "External", "Home Assistant"]
 
@@ -457,6 +466,15 @@ CONFIG_SCHEMA = cv.Schema({
     # Extended protocol: diagnostic mode
     cv.Optional(CONF_DIAGNOSTIC_MODE, default=False): cv.boolean,
 
+    # Runtime-tunable PID / Eco gains — exposed as Number entities for HA tuning without recompile
+    cv.Optional(CONF_TUNE_PID_KP): number.number_schema(class_=AutotermTunableNumber, icon="mdi:tune"),
+    cv.Optional(CONF_TUNE_PID_KI): number.number_schema(class_=AutotermTunableNumber, icon="mdi:tune"),
+    cv.Optional(CONF_TUNE_PID_KD): number.number_schema(class_=AutotermTunableNumber, icon="mdi:tune"),
+    cv.Optional(CONF_TUNE_ECO_KP): number.number_schema(class_=AutotermTunableNumber, icon="mdi:tune-variant"),
+    cv.Optional(CONF_TUNE_ECO_KI): number.number_schema(class_=AutotermTunableNumber, icon="mdi:tune-variant"),
+    cv.Optional(CONF_TUNE_ECO_KD): number.number_schema(class_=AutotermTunableNumber, icon="mdi:tune-variant"),
+    cv.Optional(CONF_TUNE_ECO_DEADBAND): number.number_schema(class_=AutotermTunableNumber, icon="mdi:thermometer-probe"),
+
 })
 
 
@@ -689,3 +707,34 @@ async def to_code(config):
         if key in config:
             txt = await text_sensor.new_text_sensor(config[key])
             cg.add(getattr(var, setter)(txt))
+
+    # Runtime-tunable numbers — create Number and wire to AutotermUART Kind
+    _TUNE_MAP = {
+        CONF_TUNE_PID_KP: "PID_KP",
+        CONF_TUNE_PID_KI: "PID_KI",
+        CONF_TUNE_PID_KD: "PID_KD",
+        CONF_TUNE_ECO_KP: "ECO_KP",
+        CONF_TUNE_ECO_KI: "ECO_KI",
+        CONF_TUNE_ECO_KD: "ECO_KD",
+        CONF_TUNE_ECO_DEADBAND: "ECO_DEADBAND",
+    }
+    for key, kind_name in _TUNE_MAP.items():
+        if key in config:
+            tune_conf = config[key]
+            # Sensible defaults: user can override min/max/step in YAML; clamp still in apply_tunable_
+            defaults = {
+                CONF_TUNE_PID_KP: (0.1, 10.0, 0.1),
+                CONF_TUNE_PID_KI: (0.0, 5.0, 0.1),
+                CONF_TUNE_PID_KD: (0.0, 2.0, 0.01),
+                CONF_TUNE_ECO_KP: (0.1, 10.0, 0.1),
+                CONF_TUNE_ECO_KI: (0.0, 5.0, 0.1),
+                CONF_TUNE_ECO_KD: (0.0, 2.0, 0.01),
+                CONF_TUNE_ECO_DEADBAND: (0.0, 2.0, 0.1),
+            }
+            dmin, dmax, dstep = defaults[key]
+            min_v = tune_conf.get("min_value", dmin)
+            max_v = tune_conf.get("max_value", dmax)
+            step_v = tune_conf.get("step", dstep)
+            num = await number.new_number(tune_conf, min_value=min_v, max_value=max_v, step=step_v)
+            kind_expr = cg.RawExpression(f"autoterm_uart::AutotermTunableNumber::Kind::{kind_name}")
+            cg.add(var.set_tunable_number(num, kind_expr))

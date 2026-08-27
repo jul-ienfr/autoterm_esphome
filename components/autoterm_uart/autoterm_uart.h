@@ -137,13 +137,24 @@ class AutotermUART;      // Forward declaration
 class AutotermClimate;   // Forward declaration
 
 // ===================
-// Custom Number Class
+// Custom Number Classes
 // ===================
 class AutotermFanLevelNumber : public number::Number {
  public:
   AutotermUART *parent_{nullptr};
   void setup_parent(AutotermUART *p) { parent_ = p; }
 
+ protected:
+  void control(float value) override;
+};
+
+// Runtime-tunable scalar (PID / Eco) — publishes and delegates to parent setter
+class AutotermTunableNumber : public number::Number {
+ public:
+  enum class Kind { PID_KP, PID_KI, PID_KD, ECO_KP, ECO_KI, ECO_KD, ECO_DEADBAND };
+  AutotermUART *parent_{nullptr};
+  Kind kind_{Kind::PID_KP};
+  void setup_parent(AutotermUART *p, Kind k) { parent_ = p; kind_ = k; }
  protected:
   void control(float value) override;
 };
@@ -705,6 +716,24 @@ class AutotermUART : public Component {
     fan_level_number_ = n;
     if (n) n->setup_parent(this);
   }
+  void set_tunable_number(AutotermTunableNumber *n, AutotermTunableNumber::Kind k) {
+    if (n) n->setup_parent(this, k);
+    // Publish current internal value to HA on boot so the UI reflects the live value
+    if (n) {
+      float v = NAN;
+      switch (k) {
+        case AutotermTunableNumber::Kind::PID_KP: v = pid_kp_; break;
+        case AutotermTunableNumber::Kind::PID_KI: v = pid_ki_; break;
+        case AutotermTunableNumber::Kind::PID_KD: v = pid_kd_; break;
+        case AutotermTunableNumber::Kind::ECO_KP: v = eco_kp_; break;
+        case AutotermTunableNumber::Kind::ECO_KI: v = eco_ki_; break;
+        case AutotermTunableNumber::Kind::ECO_KD: v = eco_kd_; break;
+        case AutotermTunableNumber::Kind::ECO_DEADBAND: v = eco_deadband_; break;
+      }
+      if (std::isfinite(v)) n->publish_state(v);
+    }
+  }
+  void apply_tunable_(AutotermTunableNumber::Kind k, float v);
   void set_climate(AutotermClimate *climate);
 
   // Commands for operating modes
