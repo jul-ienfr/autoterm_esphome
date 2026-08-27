@@ -9,7 +9,7 @@ import esphome.components.climate as climate
 import esphome.components.select as select
 import esphome.components.button as button
 
-__version__ = "1.0.0"
+__version__ = "2.0.0"
 
 DEPENDENCIES = ["sensor", "text_sensor", "number", "climate"]
 AUTO_LOAD = ["sensor", "text_sensor", "number", "climate", "select", "button"]
@@ -91,7 +91,7 @@ CONF_GLOW_PLUG_CURRENT = "glow_plug_current"
 CONF_CHAMBER_TEMP = "chamber_temp"
 CONF_BOARD_TEMP = "board_temp"
 
-TEMP_SOURCE_OPTIONS = ["Intern", "Panel", "Extern", "Home Assistant"]
+TEMP_SOURCE_OPTIONS = ["Internal", "Panel", "External", "Home Assistant"]
 
 CLIMATE_SCHEMA = climate.climate_schema(AutotermClimate).extend({
     cv.Optional(CONF_DEFAULT_LEVEL, default=4): cv.int_range(min=0, max=9),
@@ -106,15 +106,28 @@ CONFIG_SCHEMA = cv.Schema({
     cv.Required("uart_display_id"): cv.use_id(uart.UARTComponent),
     cv.Required("uart_heater_id"): cv.use_id(uart.UARTComponent),
 
-    cv.Optional("internal_temp"): sensor.sensor_schema(unit_of_measurement="°C", icon="mdi:thermometer"),
-    cv.Optional("external_temp"): sensor.sensor_schema(unit_of_measurement="°C", icon="mdi:thermometer"),
-    cv.Optional("heater_temp"): sensor.sensor_schema(unit_of_measurement="°C", icon="mdi:thermometer"),
-    cv.Optional("panel_temp"): sensor.sensor_schema(unit_of_measurement="°C", icon="mdi:thermometer"),
-    cv.Optional("voltage"): sensor.sensor_schema(unit_of_measurement="V", icon="mdi:flash"),
+    cv.Optional("internal_temp"): sensor.sensor_schema(unit_of_measurement="°C", icon="mdi:thermometer",
+        device_class=const.DEVICE_CLASS_TEMPERATURE, state_class=const.STATE_CLASS_MEASUREMENT,
+        accuracy_decimals=1),
+    cv.Optional("external_temp"): sensor.sensor_schema(unit_of_measurement="°C", icon="mdi:thermometer",
+        device_class=const.DEVICE_CLASS_TEMPERATURE, state_class=const.STATE_CLASS_MEASUREMENT,
+        accuracy_decimals=1),
+    cv.Optional("heater_temp"): sensor.sensor_schema(unit_of_measurement="°C", icon="mdi:thermometer",
+        device_class=const.DEVICE_CLASS_TEMPERATURE, state_class=const.STATE_CLASS_MEASUREMENT,
+        accuracy_decimals=1),
+    cv.Optional("panel_temp"): sensor.sensor_schema(unit_of_measurement="°C", icon="mdi:thermometer",
+        device_class=const.DEVICE_CLASS_TEMPERATURE, state_class=const.STATE_CLASS_MEASUREMENT,
+        accuracy_decimals=1),
+    cv.Optional("voltage"): sensor.sensor_schema(unit_of_measurement="V", icon="mdi:flash",
+        device_class=const.DEVICE_CLASS_VOLTAGE, state_class=const.STATE_CLASS_MEASUREMENT,
+        accuracy_decimals=2),
     cv.Optional("status"): sensor.sensor_schema(icon="mdi:information"),
-    cv.Optional("fan_speed_set"): sensor.sensor_schema(unit_of_measurement="rpm", icon="mdi:fan"),
-    cv.Optional("fan_speed_actual"): sensor.sensor_schema(unit_of_measurement="rpm", icon="mdi:fan"),
-    cv.Optional("pump_frequency"): sensor.sensor_schema(unit_of_measurement="Hz", icon="mdi:water-pump"),
+    cv.Optional("fan_speed_set"): sensor.sensor_schema(unit_of_measurement="rpm", icon="mdi:fan",
+        state_class=const.STATE_CLASS_MEASUREMENT, accuracy_decimals=0),
+    cv.Optional("fan_speed_actual"): sensor.sensor_schema(unit_of_measurement="rpm", icon="mdi:fan",
+        state_class=const.STATE_CLASS_MEASUREMENT, accuracy_decimals=0),
+    cv.Optional("pump_frequency"): sensor.sensor_schema(unit_of_measurement="Hz", icon="mdi:water-pump",
+        state_class=const.STATE_CLASS_MEASUREMENT, accuracy_decimals=1),
     cv.Optional("runtime_hours"): sensor.sensor_schema(
         unit_of_measurement="h",
         icon="mdi:clock-outline",
@@ -140,13 +153,14 @@ CONFIG_SCHEMA = cv.Schema({
         icon="mdi:gas-station-outline",
         accuracy_decimals=2,
         state_class=const.STATE_CLASS_TOTAL_INCREASING,
-        device_class=const.DEVICE_CLASS_GAS,
+        device_class=const.DEVICE_CLASS_VOLUME,
     ),
     cv.Optional("daily_fuel_consumed"): sensor.sensor_schema(
         unit_of_measurement="L",
         icon="mdi:gas-station",
         accuracy_decimals=2,
-        state_class=const.STATE_CLASS_MEASUREMENT,
+        device_class=const.DEVICE_CLASS_VOLUME,
+        state_class=const.STATE_CLASS_MEASUREMENT,  # daily reset semantics — not TOTAL_INCREASING
     ),
     cv.Optional("combustion_efficiency"): sensor.sensor_schema(
         unit_of_measurement="%",
@@ -158,12 +172,14 @@ CONFIG_SCHEMA = cv.Schema({
         unit_of_measurement="°C",
         icon="mdi:thermometer-plus",
         accuracy_decimals=1,
+        device_class=const.DEVICE_CLASS_TEMPERATURE,
         state_class=const.STATE_CLASS_MEASUREMENT,
     ),
     cv.Optional("ignition_time"): sensor.sensor_schema(
         unit_of_measurement="s",
         icon="mdi:timer-sand",
         accuracy_decimals=1,
+        device_class=const.DEVICE_CLASS_DURATION,
         state_class=const.STATE_CLASS_MEASUREMENT,
     ),
     cv.Optional("boot_count"): sensor.sensor_schema(
@@ -175,21 +191,31 @@ CONFIG_SCHEMA = cv.Schema({
         unit_of_measurement="B",
         icon="mdi:memory",
         accuracy_decimals=0,
+        device_class=const.DEVICE_CLASS_DATA_SIZE,
         state_class=const.STATE_CLASS_MEASUREMENT,
     ),
     cv.Optional("reset_reason"): text_sensor.text_sensor_schema(
         icon="mdi:restart-alert",
     ),
     cv.Optional(CONF_MAINTENANCE_OIL): sensor.sensor_schema(
+        unit_of_measurement="h",
         icon="mdi:oil",
+        accuracy_decimals=1,
+        device_class=const.DEVICE_CLASS_DURATION,
         state_class=const.STATE_CLASS_MEASUREMENT,
     ),
     cv.Optional(CONF_MAINTENANCE_FILTER): sensor.sensor_schema(
+        unit_of_measurement="h",
         icon="mdi:air-filter",
+        accuracy_decimals=1,
+        device_class=const.DEVICE_CLASS_DURATION,
         state_class=const.STATE_CLASS_MEASUREMENT,
     ),
     cv.Optional(CONF_MAINTENANCE_GLOW): sensor.sensor_schema(
+        unit_of_measurement="h",
         icon="mdi:lightning-bolt",
+        accuracy_decimals=1,
+        device_class=const.DEVICE_CLASS_DURATION,
         state_class=const.STATE_CLASS_MEASUREMENT,
     ),
 
@@ -198,36 +224,42 @@ CONFIG_SCHEMA = cv.Schema({
         unit_of_measurement="h",
         icon="mdi:oil",
         accuracy_decimals=1,
+        device_class=const.DEVICE_CLASS_DURATION,
         state_class=const.STATE_CLASS_MEASUREMENT,
     ),
     cv.Optional(CONF_MAINTENANCE_OIL_REMAINING): sensor.sensor_schema(
         unit_of_measurement="h",
         icon="mdi:oil",
         accuracy_decimals=1,
+        device_class=const.DEVICE_CLASS_DURATION,
         state_class=const.STATE_CLASS_MEASUREMENT,
     ),
     cv.Optional(CONF_MAINTENANCE_FILTER_SINCE): sensor.sensor_schema(
         unit_of_measurement="h",
         icon="mdi:air-filter",
         accuracy_decimals=1,
+        device_class=const.DEVICE_CLASS_DURATION,
         state_class=const.STATE_CLASS_MEASUREMENT,
     ),
     cv.Optional(CONF_MAINTENANCE_FILTER_REMAINING): sensor.sensor_schema(
         unit_of_measurement="h",
         icon="mdi:air-filter",
         accuracy_decimals=1,
+        device_class=const.DEVICE_CLASS_DURATION,
         state_class=const.STATE_CLASS_MEASUREMENT,
     ),
     cv.Optional(CONF_MAINTENANCE_GLOW_SINCE): sensor.sensor_schema(
         unit_of_measurement="h",
         icon="mdi:lightning-bolt",
         accuracy_decimals=1,
+        device_class=const.DEVICE_CLASS_DURATION,
         state_class=const.STATE_CLASS_MEASUREMENT,
     ),
     cv.Optional(CONF_MAINTENANCE_GLOW_REMAINING): sensor.sensor_schema(
         unit_of_measurement="h",
         icon="mdi:lightning-bolt",
         accuracy_decimals=1,
+        device_class=const.DEVICE_CLASS_DURATION,
         state_class=const.STATE_CLASS_MEASUREMENT,
     ),
 
@@ -270,6 +302,7 @@ CONFIG_SCHEMA = cv.Schema({
         unit_of_measurement="°C",
         icon="mdi:math-difference",
         accuracy_decimals=1,
+        device_class=const.DEVICE_CLASS_TEMPERATURE,
         state_class=const.STATE_CLASS_MEASUREMENT,
     ),
     cv.Optional(CONF_ECO_POWER_EFFICIENCY): sensor.sensor_schema(
@@ -315,6 +348,7 @@ CONFIG_SCHEMA = cv.Schema({
         unit_of_measurement="°C",
         icon="mdi:thermometer-auto",
         accuracy_decimals=1,
+        device_class=const.DEVICE_CLASS_TEMPERATURE,
         state_class=const.STATE_CLASS_MEASUREMENT,
     ),
 
@@ -329,12 +363,14 @@ CONFIG_SCHEMA = cv.Schema({
         unit_of_measurement="°C",
         icon="mdi:fire",
         accuracy_decimals=1,
+        device_class=const.DEVICE_CLASS_TEMPERATURE,
         state_class=const.STATE_CLASS_MEASUREMENT,
     ),
     cv.Optional(CONF_BOARD_TEMP): sensor.sensor_schema(
         unit_of_measurement="°C",
         icon="mdi:thermometer",
         accuracy_decimals=1,
+        device_class=const.DEVICE_CLASS_TEMPERATURE,
         state_class=const.STATE_CLASS_MEASUREMENT,
     ),
 
@@ -352,6 +388,7 @@ CONFIG_SCHEMA = cv.Schema({
         unit_of_measurement="m",
         icon="mdi:map-marker-radius",
         accuracy_decimals=0,
+        device_class=const.DEVICE_CLASS_DISTANCE,
         state_class=const.STATE_CLASS_MEASUREMENT,
     ),
 
@@ -362,6 +399,7 @@ CONFIG_SCHEMA = cv.Schema({
         unit_of_measurement="°C",
         icon="mdi:thermometer",
         accuracy_decimals=1,
+        device_class=const.DEVICE_CLASS_TEMPERATURE,
         state_class=const.STATE_CLASS_MEASUREMENT,
     ),
 
@@ -471,7 +509,7 @@ async def to_code(config):
 
     if "fan_level" in config:
         conf = config["fan_level"]
-        # Standardwerte definieren, falls nicht im YAML angegeben
+        # Define defaults if not provided in YAML
         min_v = conf.get("min_value", 0)
         max_v = conf.get("max_value", 9)
         step_v = conf.get("step", 1)

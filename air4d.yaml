@@ -185,7 +185,7 @@ autoterm_uart:
     # Température cible par défaut
     default_temperature: 20°C
     # Source température par défaut
-    # 1=Intern, 2=Panel, 3=Extern, 4=Home Assistant
+    # 1=Internal, 2=Panel, 3=External, 4=Home Assistant
     default_temp_sensor: 4  # Utilise HA par défaut (innenraum_temperature)
     # Hystérésis thermostat (évite oscillations)
     thermostat_hysteresis_on: 2.0   # Démarre si T < (cible - 2°C)
@@ -757,40 +757,33 @@ time:
 # Voir: docs.esphome.io/components/canbus
 
 # --- Capteur CO (Détecteur Monoxyde de Carbone) ---
-# CRITIQUE pour la sécurité: les échangeurs fissurés fuient du CO dans l'habitacle
-# Nécessite: MQ-7 ou détecteur CO dédié (alarme à 50ppm)
-# Seuil d'arrêt: > 35ppm sustained
+# CRITIQUE pour la sécurité: les échangeurs fissurés fuient du CO dans l'habitacle.
+# ⚠️ RECOMMANDATION: utilisez un détecteur CO certifié EN 50291 à sortie relais
+# (ex: Honeywell XC70, FireAngel CO-9D, Ei208D) plutôt qu'un MQ-7 brut.
+# Le MQ-7 exige un cycle de chauffe 60s/90s et n'est pas quantitatif sans
+# calibration Rs/R0 rigoureuse — il peut rater un pic ou déclencher à tort.
+# Un détecteur certifié fournit un contact sec fiable : fermé = CO détecté.
 #
-# sensor:
-#   - platform: adc
-#     pin: GPIO34
-#     id: co_sensor_raw
-#     name: "CO Sensor Raw"
-#     update_interval: 5s
+# Câblage détecteur certifié (contact sec NO, fermé en alarme):
+#   COM du détecteur → GND ESP32
+#   NO  du détecteur → GPIO34 (pull-up interne activé ci-dessous)
+#
+# binary_sensor:
+#   - platform: gpio
+#     pin:
+#       number: GPIO34
+#       mode: INPUT_PULLUP
+#       inverted: true        # HIGH au repos (pull-up), LOW = alarme
+#     id: co_alarm_relay
+#     name: "CO Alarm (certified detector)"
 #     filters:
-#       - multiply: 3.3  # Conversion ADC
-#   - platform: template
-#     name: "CO Level"
-#     id: co_level
-#     unit_of_measurement: "ppm"
-#     icon: "mdi:cloud"
-#     lambda: |-
-#       float raw = id(co_sensor_raw).state;
-#       // MQ-7 calibration: Rs/R0 curve
-#       float co_ppm = pow(10, (log10(raw/3.3) - 0.32) / -0.46);
-#       return co_ppm;
-#     on_value:
+#       - delayed_on: 2s      # anti-rebond : confirme 2 s
+#     on_press:
 #       then:
-#         - if:
-#             condition:
-#               sensor.in_range:
-#                 id: co_level
-#                 above: 35
-#             then:
-#               - logger.log:
-#                   level: ERROR
-#                   format: "CO DANGER: %.1f ppm — shutting down heater!"
-#               - switch.turn_off: heater_fuel_pump
+#         - logger.log:
+#             level: ERROR
+#             format: "CO DANGER (certified detector) — shutting down heater!"
+#         - switch.turn_off: heater_fuel_pump
 #
 # switch:
 #   - platform: gpio
@@ -798,6 +791,25 @@ time:
 #     id: heater_fuel_pump
 #     name: "Fuel Pump Relay"
 #     inverted: true  # Normally open = OFF when ESP is off
+#
+# --- Legacy MQ-7 (déconseillé, conservé pour référence) ---
+# sensor:
+#   - platform: adc
+#     pin: GPIO34
+#     id: co_sensor_raw
+#     name: "CO Sensor Raw (MQ-7 legacy)"
+#     update_interval: 5s
+#     filters:
+#       - multiply: 3.3
+#   - platform: template
+#     name: "CO Level (MQ-7 legacy)"
+#     id: co_level
+#     unit_of_measurement: "ppm"
+#     icon: "mdi:cloud"
+#     lambda: |-
+#       float raw = id(co_sensor_raw).state;
+#       float co_ppm = pow(10, (log10(raw/3.3) - 0.32) / -0.46);
+#       return co_ppm;
 
 # --- Capteur Température Échappement (Thermocouple K) ---
 # ⚠️ Le chauffage Autoterm a DÉJÀ un capteur T° échappement intégré

@@ -267,6 +267,7 @@ class AutotermUART : public Component {
   bool heater_running_{false};
   uint32_t last_runtime_millis_{0};
   uint32_t last_runtime_save_millis_{0};
+  uint32_t last_fuel_save_millis_{0};
 
   struct Settings {
     uint8_t use_work_time = 1;
@@ -350,10 +351,10 @@ class AutotermUART : public Component {
   sensor::Sensor *delta_t_sensor_{nullptr};
   float last_ambient_temp_c_{NAN};
   float last_exhaust_temp_c_{NAN};
-  float combustion_efficiency_pct_{0.0f};
-  float exhaust_temp_derivative_{0.0f};  // dT_exhaust/dt in °C/min
+  float combustion_efficiency_pct_{NAN};
+  float exhaust_temp_derivative_{NAN};  // dT_exhaust/dt in °C/min — NAN until 2nd sample
   uint32_t last_exhaust_update_ms_{0};
-  float delta_t_c_{0.0f};
+  float delta_t_c_{NAN};
 
   // Trend tracking: glow plug current and combustion efficiency
   float glow_plug_trend_{0.0f};  // Positive = degrading, negative = improving
@@ -570,8 +571,10 @@ class AutotermUART : public Component {
   float last_heater_temp_c_{NAN};
   float last_pump_freq_c_{0.0f};
 
-  // Extended protocol: Diagnostic mode (0x07)
+  // Extended protocol: Diagnostic mode (0x07) — heater may not support 0x07, degrade gracefully
   bool diagnostic_mode_active_{false};
+  bool diagnostic_supported_{true};
+  uint8_t diag_retries_{0};
   sensor::Sensor *glow_plug_current_sensor_{nullptr};
   sensor::Sensor *chamber_temp_sensor_{nullptr};
   sensor::Sensor *board_temp_sensor_{nullptr};
@@ -581,8 +584,11 @@ class AutotermUART : public Component {
   sensor::Sensor *error_code_sensor_{nullptr};
   text_sensor::TextSensor *error_text_sensor_{nullptr};
 
-  // Extended protocol: Version (0x06)
+  // Extended protocol: Version (0x06) — graceful degrade if heater FW does not answer
   text_sensor::TextSensor *firmware_version_sensor_{nullptr};
+  uint32_t last_version_request_ms_{0};
+  uint8_t version_retries_{0};
+  bool version_supported_{true};  // set false after repeated timeout → stop polling
 
   // Extended protocol: History / Report (0x0B)
   uint16_t history_total_hours_{0};
@@ -773,12 +779,12 @@ class AutotermUART : public Component {
     check_uart_loss_(now);
 
     // Safety checks (run on every loop)
-    // Burn-out protection suppresses flameout check during first 4 min
+    // Priority: CO (always) > overtemp (inside check_emergency_shutdown_) > flameout (suppressed during burnout)
     if (heater_running_ && !emergency_shutdown_active_ && !burnout_protection_active_) {
       check_flameout_(last_heater_temp_c_, last_pump_freq_c_, now);
     }
 
-    // CO sensor check (SAVES LIVES — runs on every loop)
+    // CO sensor check (SAVES LIVES — runs on every loop, never suppressed by burnout)
     check_co_level_();
 
     // Shutdown monitoring: track purge fan via exhaust temperature
@@ -812,9 +818,15 @@ class AutotermUART : public Component {
     }
 
     // Extended protocol: enable diagnostic mode after 5 seconds uptime (once)
-    if (diagnostic_mode_active_ && !diagnostic_sent_ && now > 5000) {
+    if (diagnostic_mode_active_ && diagnostic_supported_ && !diagnostic_sent_ && now > 5000) {
       send_diagnostic_mode_(true);
       diagnostic_sent_ = true;
+      if (diag_retries_ < 255) diag_retries_++;
+    }
+    // Graceful degrade: heater FW may lack 0x06 (version) → stop polling after 3 timeouts
+    if (version_supported_ && version_retries_ >= 3 && (now - last_version_request_ms_) > 10000) {
+      ESP_LOGW("autoterm_uart", "Version 0x06 unsupported by heater FW after %u retries — stop polling", version_retries_);
+      version_supported_ = false;
     }
 
     // Request history/report every 5 minutes
@@ -929,6 +941,7 @@ class AutotermUART : public Component {
     uint32_t now = millis();
     last_runtime_millis_ = now;
     last_runtime_save_millis_ = now;
+    last_fuel_save_millis_ = now;
     last_heater_activity_ = now;
     runtime_tracking_initialized_ = true;
 
@@ -958,10 +971,13 @@ class AutotermUART : public Component {
     // Extended protocol: request firmware version at startup
     send_version_request_();
 
-    // Extended protocol: enable diagnostic mode if configured
-    if (diagnostic_mode_active_) {
-      // Delayed enable to avoid overwhelming the UART during startup
-      // Will be enabled in loop() after a short delay
+    // Extended protocol: version / diagnostic
+    // send_version_request_() stamps last_version_request_ms_/retries (see cpp) —
+    // if heater FW lacks 0x06/0x07, loop() will back off after 3 timeouts.
+    // Handshake 0x1C is currently unused/dead-code — kept for future heater handshake,
+    // do not poll it here.
+    if (diagnostic_mode_active_ && !diagnostic_supported_) {
+      ESP_LOGW("autoterm_uart", "Diagnostic requested but heater previously NACKed 0x07 — skip enable");
     }
   }
 

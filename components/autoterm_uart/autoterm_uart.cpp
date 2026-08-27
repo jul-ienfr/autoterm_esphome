@@ -31,100 +31,103 @@ void AutotermUART::forward_and_sniff(uart::UARTComponent *src, uart::UARTCompone
   auto &buffer = from_display ? display_to_heater_buffer_ : heater_to_display_buffer_;
   auto &frame_start = from_display ? display_frame_start_millis_ : heater_frame_start_millis_;
 
+  // Drain all pending bytes into buffer first (avoids per-byte flush/erase churn)
+  bool activity_this_call = false;
   while (src->available()) {
     uint8_t b;
     if (!src->read_byte(&b)) break;
-
     buffer.push_back(b);
+    activity_this_call = true;
+  }
+  if (!activity_this_call) return;
+  if (from_display) last_display_activity_ = millis();
+  else last_heater_activity_ = millis();
 
-    if (from_display) {
-      last_display_activity_ = millis();
-    } else {
-      last_heater_activity_ = millis();
-    }
-
-    // Track frame start time for timeout detection
-    if (buffer.size() == 1 && b == FRAME_HEADER) {
-      frame_start = millis();
-    }
-
-    // Forward bytes before header directly
-    while (!buffer.empty() && buffer[0] != FRAME_HEADER) {
-      dst->write_byte(buffer[0]);
-      buffer.erase(buffer.begin());
-    }
-
-    // Frame timeout: if we started a frame but haven't completed it, resync
-    if (!buffer.empty() && buffer[0] == FRAME_HEADER && frame_start > 0) {
-      uint32_t now = millis();
-      if (check_frame_timeout_(frame_start, now)) {
-        ESP_LOGW("autoterm_uart", "[%s] Frame timeout after %u ms, resyncing",
-                 tag, static_cast<unsigned>(now - frame_start));
-        resync_uart_buffer_(buffer);
-        frame_start = 0;
-        continue;
+  // Forward any leading garbage before the first header (passive data, never a frame)
+  {
+    auto it = std::find(buffer.begin(), buffer.end(), FRAME_HEADER);
+    if (it != buffer.begin()) {
+      size_t garbage = (it == buffer.end()) ? buffer.size() : static_cast<size_t>(it - buffer.begin());
+      if (garbage > 0) {
+        dst->write_array(buffer.data(), garbage);
+        buffer.erase(buffer.begin(), buffer.begin() + garbage);
       }
+      if (buffer.empty()) { frame_start = 0; return; }
     }
+  }
+  if (!buffer.empty() && buffer[0] == FRAME_HEADER && frame_start == 0) {
+    frame_start = millis();
+  }
 
-    while (true) {
-      if (buffer.empty())
-        break;
-      if (buffer[0] != FRAME_HEADER)
-        break;
-      if (buffer.size() < 3)
-        break;
-
-      uint8_t len = buffer[2];
-      size_t total = 5 + static_cast<size_t>(len) + 2;
-      if (buffer.size() < total)
-        break;
-
-      frame_start = 0;  // Frame complete, reset timeout
-      std::vector<uint8_t> frame(buffer.begin(), buffer.begin() + total);
-      process_frame_(std::move(frame), dst, tag, from_display);
-      buffer.erase(buffer.begin(), buffer.begin() + total);
-    }
-
-    // Buffer overflow protection: if buffer grows too large without a valid frame
-    if (buffer.size() > 64) {
-      ESP_LOGW("autoterm_uart", "[%s] Buffer overflow (%u bytes), flushing", tag, buffer.size());
-      for (uint8_t byte : buffer)
-        dst->write_byte(byte);
-      buffer.clear();
+  // Frame timeout: incomplete frame stuck in buffer
+  if (!buffer.empty() && buffer[0] == FRAME_HEADER && frame_start > 0) {
+    uint32_t now = millis();
+    if (check_frame_timeout_(frame_start, now)) {
+      ESP_LOGW("autoterm_uart", "[%s] Frame timeout after %u ms, resyncing", tag,
+               static_cast<unsigned>(now - frame_start));
+      resync_uart_buffer_(buffer);
       frame_start = 0;
+      if (buffer.empty()) return;
+      if (buffer[0] == FRAME_HEADER) frame_start = now;
     }
+  }
+
+  // Extract complete frames
+  while (true) {
+    if (buffer.empty()) break;
+    if (buffer[0] != FRAME_HEADER) break;
+    if (buffer.size() < 3) break;
+    uint8_t len = buffer[2];
+    size_t total = 5 + static_cast<size_t>(len) + 2;
+    if (buffer.size() < total) break;
+    frame_start = 0;
+    std::vector<uint8_t> frame(buffer.begin(), buffer.begin() + total);
+    process_frame_(std::move(frame), dst, tag, from_display);
+    buffer.erase(buffer.begin(), buffer.begin() + total);
+    if (!buffer.empty() && buffer[0] == FRAME_HEADER) frame_start = millis();
+  }
+
+  // Overflow guard: too much buffered without a valid frame (wiring fault)
+  if (buffer.size() > 64) {
+    ESP_LOGW("autoterm_uart", "[%s] Buffer overflow (%u bytes), flushing", tag, buffer.size());
+    dst->write_array(buffer.data(), buffer.size());
+    buffer.clear();
+    frame_start = 0;
   }
 }
 
-// CRC16 (Modbus)
+// CRC16 (Modbus) — endian-safe: wire order is big-endian (high byte first)
 bool AutotermUART::validate_crc(const std::vector<uint8_t> &data) {
   if (data.size() < 3) return false;
   uint16_t expected = crc16_modbus_(data.data(), data.size() - 2);
-  uint16_t recv_crc = (data[data.size() - 2] << 8) | data[data.size() - 1];
+  uint16_t recv_crc = (static_cast<uint16_t>(data[data.size() - 2]) << 8) | data[data.size() - 1];
   return expected == recv_crc;
 }
 
-// Validate frame structure
+// Validate frame structure — rejects oversized len that would overflow buffer
 bool AutotermUART::validate_frame_structure_(const std::vector<uint8_t> &frame) {
-  if (frame.size() < 5) return false;
+  if (frame.size() < 7) return false;  // header(5) + CRC(2) minimum
   if (frame[0] != FRAME_HEADER) return false;
-  // Accept all known device IDs: display(0x03), heater(0x04), diagnostic(0x02), boot(0x00)
   if (frame[1] != DEVICE_DISPLAY && frame[1] != DEVICE_HEATER &&
       frame[1] != DEVICE_DIAG && frame[1] != DEVICE_BOOT) return false;
   uint8_t len = frame[2];
+  if (len > 64) return false;  // sanity: payload never exceeds 64 bytes on this bus
   size_t expected_total = 5 + static_cast<size_t>(len) + 2;
   if (frame.size() != expected_total) return false;
   return true;
 }
 
 void AutotermUART::log_frame(const char *tag, const std::vector<uint8_t> &data) {
-  std::string hex;
-  char temp[6];
-  for (auto v : data) {
-    sprintf(temp, "%02X ", v);
-    hex += temp;
+  // Stack-only — no heap alloc (critical: called on every valid frame in loop)
+  // Hex buffer: 3 chars per byte ("XX ") + NUL. 64 bytes -> 192 chars, cap to 128.
+  char hex[384];
+  size_t pos = 0;
+  for (size_t i = 0; i < data.size() && pos + 4 < sizeof(hex); i++) {
+    pos += snprintf(hex + pos, sizeof(hex) - pos, "%02X ", data[i]);
   }
-  ESP_LOGD("autoterm_uart", "[%s] Frame (%u bytes): %s", tag, (unsigned)data.size(), hex.c_str());
+  if (pos > 0 && hex[pos - 1] == ' ') hex[pos - 1] = '\0';
+  else if (pos < sizeof(hex)) hex[pos] = '\0';
+  ESP_LOGD("autoterm_uart", "[%s] Frame (%u bytes): %s", tag, (unsigned)data.size(), hex);
 }
 
 // ===================
@@ -143,30 +146,30 @@ void AutotermFanLevelNumber::control(float value) {
 
 void AutotermTempSourceSelect::set_parent(AutotermUART *parent) {
   parent_ = parent;
-  this->traits.set_options({"Intern", "Panel", "Extern", "Home Assistant"});
+  this->traits.set_options({"Internal", "Panel", "External", "Home Assistant"});
 }
 
 const char *AutotermTempSourceSelect::option_from_source_(uint8_t source) const {
   switch (source) {
     case 1:
-      return "Intern";
+      return "Internal";
     case 2:
       return "Panel";
     case 3:
-      return "Extern";
+      return "External";
     case 4:
       return "Home Assistant";
     default:
-      return "Intern";
+      return "Internal";
   }
 }
 
 uint8_t AutotermTempSourceSelect::source_from_option_(const std::string &option) const {
-  if (option == "Intern" || option == "1")
+  if (option == "Internal" || option == "Intern" || option == "1")
     return 1;
   if (option == "Panel" || option == "2")
     return 2;
-  if (option == "Extern" || option == "3")
+  if (option == "External" || option == "Extern" || option == "3")
     return 3;
   if (option == "Home Assistant" || option == "4")
     return 4;
@@ -676,9 +679,10 @@ void AutotermUART::publish_fuel_consumption_(bool force) {
 
 void AutotermUART::maybe_save_fuel_(uint32_t now, bool force) {
   if (!fuel_dirty_) return;
-  if (!force && (now - last_runtime_save_millis_) < CRC_SAVE_INTERVAL_MS) return;
+  if (!force && (now - last_fuel_save_millis_) < CRC_SAVE_INTERVAL_MS) return;
   if (fuel_pref_.save(&total_fuel_liters_)) {
     fuel_dirty_ = false;
+    last_fuel_save_millis_ = now;
   }
 }
 
@@ -746,17 +750,18 @@ void AutotermUART::update_combustion_efficiency_(float heater_temp, float ambien
   last_exhaust_temp_c_ = effective_exhaust_temp;
   last_ambient_temp_c_ = ambient_temp;
 
-  // Delta-T across heat exchanger
-  delta_t_c_ = heater_temp - ambient_temp;
+  // Delta-T across heat exchanger (effective exhaust — thermocouple direct preferred)
+  delta_t_c_ = effective_exhaust_temp - ambient_temp;
 
   // Efficiency estimate: ratio of actual delta-T to maximum possible
-  // Max delta-T at full power is roughly 350°C (exhaust at 350°C, ambient at 20°C)
-  // Efficiency = actual_delta / max_delta, clamped to 0-100%
-  float max_delta = 350.0f;
-  combustion_efficiency_pct_ = std::min(100.0f, std::max(0.0f, (delta_t_c_ / max_delta) * 100.0f));
+  // Max delta-T at full power is ~350°C (exhaust 350°C, ambient 20°C) — spec Autoterm Air 4D
+  // Efficiency = actual_delta / max_delta, clamped 0-100%
+  static constexpr float MAX_DELTA_C = 350.0f;  // ΔT_max [°C], spec 4D max exhaust
+  combustion_efficiency_pct_ = std::min(100.0f, std::max(0.0f, (delta_t_c_ / MAX_DELTA_C) * 100.0f));
 
-  if (delta_t_sensor_) delta_t_sensor_->publish_state(delta_t_c_);
-  if (combustion_efficiency_sensor_) combustion_efficiency_sensor_->publish_state(combustion_efficiency_pct_);
+  if (delta_t_sensor_ && std::isfinite(delta_t_c_)) delta_t_sensor_->publish_state(delta_t_c_);
+  if (combustion_efficiency_sensor_ && std::isfinite(combustion_efficiency_pct_))
+    combustion_efficiency_sensor_->publish_state(combustion_efficiency_pct_);
 
   // Track combustion efficiency trend for predictive maintenance
   if (combustion_efficiency_pct_ > 0.0f) {
@@ -952,8 +957,15 @@ void AutotermUART::update_wear_score_(float heater_temp, float pump_freq) {
   wear_sum_ratios_ += ratio;
   wear_sample_count_++;
 
-  // Publish wear score every 100 samples (~200s at 2s polling)
+    // Publish wear score every 100 samples (~200s at 2s polling)
   if (wear_sample_count_ >= 100 && wear_score_sensor_) {
+    if (!std::isfinite(wear_baseline_ratio_) || wear_baseline_ratio_ == 0.0f) {
+      // Baseline corrupted/zero — reset baseline to current average
+      wear_baseline_ratio_ = wear_sum_ratios_ / wear_sample_count_;
+      wear_sum_ratios_ = 0.0f;
+      wear_sample_count_ = 0;
+      return;
+    }
     float avg_ratio = wear_sum_ratios_ / wear_sample_count_;
     // Score: 100% = perfect (same as baseline), lower = more wear
     float deviation = std::fabs(avg_ratio - wear_baseline_ratio_) / wear_baseline_ratio_;
@@ -1014,40 +1026,39 @@ void AutotermUART::update_system_health_(uint32_t now) {
   if ((now - last_health_check_ms_) < 60000) return;  // Check every 60 seconds
   last_health_check_ms_ = now;
 
-  // Build health status string
-  std::string health;
+  // Build health status — stack buffer, no heap on hot-path throttle (60s)
+  char health[96]{0};
+  size_t hl = 0;
   int issues = 0;
 
-  // Check CRC error rate
+  auto append = [&](const char *s) {
+    size_t n = strlen(s);
+    if (hl + n < sizeof(health) - 1) { memcpy(health + hl, s, n); hl += n; health[hl] = '\0'; }
+  };
+
   if (frame_count_ > 100) {
     float error_rate = static_cast<float>(crc_error_count_) / frame_count_ * 100.0f;
     if (error_rate > 5.0f) {
-      health += "CRC:" + std::to_string(static_cast<int>(error_rate)) + "% ";
-      issues++;
+      char tmp[16]; snprintf(tmp, sizeof(tmp), "CRC:%d%% ", static_cast<int>(error_rate));
+      append(tmp); issues++;
     }
   }
 
-  // Check voltage stability
-  if (std::isfinite(voltage_sensor_->state)) {
+  if (voltage_sensor_ && std::isfinite(voltage_sensor_->state)) {
     float v = voltage_sensor_->state;
-    if (v < 11.0f) { health += "VLOW:"; health += std::to_string(v); health += "V "; issues++; }
-    else if (v > 14.5f) { health += "VHIGH:"; health += std::to_string(v); health += "V "; issues++; }
+    if (v < 11.0f || v > 14.5f) {
+      char tmp[20]; snprintf(tmp, sizeof(tmp), "%s:%.1fV ", v < 11.0f ? "VLOW" : "VHIGH", v);
+      append(tmp); issues++;
+    }
   }
 
-  // Check UART connectivity
-  if (!heater_connected_) { health += "NO_UART "; issues++; }
+  if (!heater_connected_) { append("NO_UART "); issues++; }
+  if (last_error_code_ != 0x00) { char tmp[16]; snprintf(tmp, sizeof(tmp), "ERR:%u ", (unsigned) last_error_code_); append(tmp); issues++; }
 
-  // Check for active errors
-  if (last_error_code_ != 0x00) {
-    health += "ERR:" + std::to_string(last_error_code_) + " ";
-    issues++;
-  }
-
-  // Overall status
   if (issues == 0) {
     if (reset_reason_sensor_) reset_reason_sensor_->publish_state("healthy");
   } else {
-    ESP_LOGW("autoterm_uart", "System health: %d issues detected — %s", issues, health.c_str());
+    ESP_LOGW("autoterm_uart", "System health: %d issues detected — %s", issues, health);
   }
 }
 
@@ -1064,11 +1075,11 @@ void AutotermUART::update_altitude_compensation_() {
 
   current_altitude_m_ = altitude;
 
-  // Barometric formula: air density decreases ~12% per 1000m
-  // density_factor = (1 - altitude/44330)^5.256 (simplified ISA model)
-  // At sea level: 1.0, at 1000m: ~0.89, at 2000m: ~0.78, at 3000m: ~0.69
-  float density_factor = std::pow(1.0f - altitude / 44330.0f, 5.256f);
-  density_factor = std::max(0.5f, std::min(1.0f, density_factor));  // Clamp to 50-100%
+  // ISA barometric density: rho/rho0 = (1 - h/44330)^5.256 — h [m], 44330 = T0/L [K/(K/m)]
+  // At sea level: 1.0, 1000m ~0.89, 2000m ~0.78, 3000m ~0.69 (−12%/km)
+  float base = 1.0f - altitude / 44330.0f;  // guarded: altitude clamped −500..10000 so base in (0.77..1.01)
+  float density_factor = std::pow(std::max(0.01f, base), 5.256f);
+  density_factor = std::max(0.5f, std::min(1.0f, density_factor));  // Clamp 50-100%
 
   if (std::fabs(density_factor - air_density_factor_) > 0.02f) {
     air_density_factor_ = density_factor;
@@ -1245,14 +1256,19 @@ void AutotermUART::periodic_backup_(uint32_t now) {
     return;
   last_backup_ms_ = now;
 
-  // Redundant save of all critical data
-  maybe_save_runtime_hours_(now, true);
-  maybe_save_fuel_(now, true);
-  save_stats_();
-  save_burn_cycle_hours_();
+  // Only force-save what is actually dirty — avoids redundant flash writes
+  if (runtime_dirty_)
+    maybe_save_runtime_hours_(now, true);
+  if (fuel_dirty_)
+    maybe_save_fuel_(now, true);
+  if (stats_dirty_)
+    save_stats_();
+  if (burn_cycle_hours_dirty_)
+    save_burn_cycle_hours_();
+  // Maintenance counters save directly; no dirty flag — skip if unchanged since last save
   save_maintenance_counters_();
 
-  // Save prediction data if active
+  // Save prediction data if active (throttled inside)
   if (prediction_active_ && prediction_initialized_)
     save_prediction_data_();
 
@@ -1929,7 +1945,7 @@ void AutotermUART::parse_status(const std::vector<uint8_t> &data) {
 
   if (internal_temp_sensor_) internal_temp_sensor_->publish_state(internal_temp);
   if (external_temp_sensor_) external_temp_sensor_->publish_state(external_temp);
-  if (heater_temp_sensor_) heater_temp_sensor_->publish_state(heater_temp);
+  if (heater_temp_sensor_ && std::isfinite(heater_temp)) heater_temp_sensor_->publish_state(heater_temp);
 
   last_internal_temp_c_ = internal_temp;
   // External temperature with fallback cache
@@ -2198,7 +2214,10 @@ void AutotermUART::send_report_request_() {
 }
 
 void AutotermUART::send_version_request_() {
+  if (!version_supported_) return;  // heater FW does not speak 0x06 — stop polling
   send_command_(FUNC_VERSION, {}, "request.version");
+  last_version_request_ms_ = millis();
+  if (version_retries_ < 255) version_retries_++;
 }
 
 void AutotermUART::send_prime_pump_(uint8_t frequency) {
@@ -2278,6 +2297,10 @@ void AutotermUART::parse_diagnostic_(const std::vector<uint8_t> &data) {
   // Publish board temp
   if (board_temp_sensor_) board_temp_sensor_->publish_state(board_temp);
 
+  // Heater did speak 0x07 → degrade counters cleared
+  diagnostic_supported_ = true;
+  diag_retries_ = 0;
+
   // Publish fault code
   if (error_code_sensor_) error_code_sensor_->publish_state(fault_code);
   if (error_text_sensor_) error_text_sensor_->publish_state(error_code_to_text_(fault_code));
@@ -2294,6 +2317,8 @@ void AutotermUART::parse_version_(const std::vector<uint8_t> &data) {
            p[0], p[1], p[2], p[3], p[4]);
 
   ESP_LOGI("autoterm_uart", "Firmware version: %s", version_buf);
+  version_supported_ = true;
+  version_retries_ = 0;
   if (firmware_version_sensor_) firmware_version_sensor_->publish_state(version_buf);
 }
 
@@ -2708,8 +2733,32 @@ void AutotermUART::evaluate_eco_adaptive_(bool force) {
              last_exhaust_temp_c_, ANTI_CONDENSATION_TEMP_C);
   }
 
-  // Map output to level 1-9
+  // Map output to level 1-9 — guards for degenerate config (min==max, kp==0)
+  if (eco_max_level_ == eco_min_level_) {
+    int level = static_cast<int>(eco_min_level_);
+    if (night_mode_active_ && level > static_cast<int>(night_mode_max_level_)) level = static_cast<int>(night_mode_max_level_);
+    if (air_density_factor_ < 0.95f) { int am = std::max(1, static_cast<int>(9 * air_density_factor_)); if (level > am) level = am; }
+    if (burnout_protection_active_ && level < static_cast<int>(BURNOUT_MIN_LEVEL)) level = static_cast<int>(BURNOUT_MIN_LEVEL);
+    uint8_t nl = static_cast<uint8_t>(level);
+    if (!heater_running_ || eco_current_level_ == 0) {
+      send_power_mode(true, nl);
+      eco_current_level_ = nl;
+      eco_last_command_ms_ = now;
+      thermostat_heating_request_ = true;
+      thermostat_last_sent_level_ = nl;
+    } else if (nl != eco_current_level_ && (now - eco_last_command_ms_) > 3000) {
+      send_power_mode(false, nl);
+      eco_current_level_ = nl;
+      eco_last_command_ms_ = now;
+      thermostat_last_sent_level_ = nl;
+    }
+    if (eco_adaptive_level_sensor_) eco_adaptive_level_sensor_->publish_state(static_cast<float>(eco_current_level_));
+    if (eco_adaptive_error_sensor_) eco_adaptive_error_sensor_->publish_state(error);
+    if (eco_power_efficiency_sensor_) { float eff = (eco_max_level_ > 0) ? (1.0f - static_cast<float>(eco_current_level_) / static_cast<float>(eco_max_level_)) * 100.0f : 0.0f; eco_power_efficiency_sensor_->publish_state(eff); }
+    return;
+  }
   float max_output = eco_kp_ * 5.0f;  // Reference: error=5°C at max gain
+  if (max_output == 0.0f) max_output = 1.0f;  // Guard kp==0
   float normalized = output / max_output;
   int level = static_cast<int>(std::round(1.0f + normalized * 8.0f));
   level = std::max(static_cast<int>(eco_min_level_), std::min(static_cast<int>(eco_max_level_), level));

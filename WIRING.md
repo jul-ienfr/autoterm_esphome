@@ -187,19 +187,23 @@ void loop() {
 
 ## Capteurs optionnels (recommandés)
 
-### MQ-7 — Détecteur CO (🔴 sécurité)
+### Détecteur CO certifié — RECOMMANDÉ (🔴 sécurité)
 
-> **Recommandé** — détecte les fuites de monoxyde de carbone dues à un échangeur fissuré.
+> **Recommandé : détecteur CO certifié EN 50291 à sortie relais**
+> (ex : Honeywell XC70, FireAngel CO-9D, Ei208D).
+> Le MQ-7 brut exige un cycle 60 s/90 s et n'est pas quantitatif sans calibration
+> Rs/R0 — il peut rater un pic ou déclencher à tort. Un détecteur certifié
+> fournit un contact sec fiable : fermé = CO détecté → arrêt chauffage immédiat.
 
 ```
-MQ-7 VCC → 5V ESP32
-MQ-7 GND → GND ESP32
-MQ-7 AOUT → GPIO34 (ADC)
+Détecteur COM → GND ESP32
+Détecteur NO  → GPIO34 (INPUT_PULLUP, inverted: true)
+Pompe → relais sur GPIO25 (coupé si CO alarme)
 ```
 
-- Module PCB MQ-7 (~3€) : gère automatiquement le cycle de chauffe
-- Seuil d'urgence : > 35 ppm → arrêt automatique
+- Seuil d'urgence : contact fermé confirmé 2 s → `switch.turn_off: heater_fuel_pump`
 - **SANS ce capteur, le système fonctionne parfaitement** — il améliore la sécurité
+- Legacy MQ-7 (déconseillé) : voir `air4d.yaml` section commentée `MQ-7 legacy`
 
 ### Thermocouple K — T° échappement direct (optionnel)
 
