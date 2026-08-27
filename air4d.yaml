@@ -1,3 +1,6 @@
+packages:
+  common: !include air4d_common.yaml
+
 esphome:
   name: air4d
   friendly_name: Autotherm Air4D
@@ -19,21 +22,6 @@ esp32:
       # Watchdog matériel: redémarrage auto si blocage logiciel
       CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0: y
       CONFIG_ESP_TASK_WDT_TIMEOUT_S: "30"
-
-# IMPORTANT: Utilise le code local amélioré (avec fix pointeurs + monitoring CRC)
-# Structure de dossiers requise:
-#   config/
-#   ├── air4d.yaml (ce fichier)
-#   └── components/
-#       └── autoterm_uart/
-#           ├── __init__.py
-#           ├── autoterm_uart.h (version improved)
-#           ├── climate.py
-#           └── ...
-external_components:
-  - source: components  # Charge depuis le dossier local
-    components: [autoterm_uart]
-    refresh: 0s
 
 # Logger optimisé pour UART intensif
 logger:
@@ -109,36 +97,8 @@ web_server:
 
 captive_portal:
 
-# Configuration UART optimisée
-uart:
-  # UART Panel (Display/Télécommande)
-  - id: uart_panel
-    # ATTENTION: Vérifie ton modèle ESP32
-    # ESP32-WROOM (standard): RX=16 TX=17 OK ✅
-    # ESP32-WROVER (avec PSRAM): RX=16 TX=17 DANGER ❌ (utilise 25/26 à la place)
-    rx_pin: GPIO16
-    tx_pin: GPIO17
-    baud_rate: 9600
-    # Buffer agrandi pour éviter overflow (protocole bavard)
-    rx_buffer_size: 1024
-    # Paramètres série Autoterm
-    parity: NONE
-    stop_bits: 1
-    data_bits: 8
-    # Debug: décommenter pour voir les bytes bruts
-    # debug:
-    #   direction: BOTH
-    #   dummy_receiver: false
-
-  # UART Heater (Connexion directe chaudière)
-  - id: uart_heater
-    rx_pin: GPIO22
-    tx_pin: GPIO23
-    baud_rate: 9600
-    rx_buffer_size: 1024
-    parity: NONE
-    stop_bits: 1
-    data_bits: 8
+# UART hérité de air4d_common.yaml (GPIO16/17 panel, GPIO22/23 heater, 9600 8N1)
+# Pour debug brut: surcharger avec uart debug: direction: BOTH (voir WIRING.md)
 
 # Capteur température Home Assistant (injecté dans le chauffage)
 sensor:

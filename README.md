@@ -44,8 +44,9 @@ Projet_Autoterm/
 ├── components/autoterm_uart/
 │   ├── __init__.py              ← Registration ESPHome (380+ lignes)
 │   └── autoterm_uart.h          ← Composant C++ complet (3900+ lignes)
-├── air4d.yaml                   ← Config ESPHome production
-├── air4d_test.yaml              ← Config test diagnostic UART
+├── air4d.yaml                   ← Config ESPHome production (esp-idf, packages common)
+├── air4d_test.yaml              ← Config test diagnostic UART (arduino, packages common)
+├── air4d_common.yaml            ← Commun UART + external_components (!include via packages)
 ├── secrets.yaml                 ← WiFi + mots de passe (à remplir)
 ├── dashboard.html               ← Interface web temps réel
 ├── ha_automations.yaml          ← 19 automatisations Home Assistant
