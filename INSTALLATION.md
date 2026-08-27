@@ -9,7 +9,7 @@ Guide pas-à-pas pour installer et configurer le pont UART Autoterm avec ESPHome
 | Composant | Quantité | Prix estimé | Lien |
 |-----------|----------|-------------|------|
 | ESP32 DevKit v1 | 1 | ~5€ | AliExpress / Amazon |
-| Convertisseur 5V→3.3V (MAX3232 ou diviseur) | 2 | ~1€ | AliExpress |
+| Convertisseur bidirectionnel 3.3V↔5V (TXS0108E — 1 module suffit pour 4 fils — ou 2× BSS138) | 1-2 | ~1-2€ | AliExpress |
 | Câbles Dupont M/F | 10 | ~2€ | AliExpress |
 | Câbles Dupont F/F | 4 | ~1€ | AliExpress |
 | Alimentation 12V→5V buck converter | 1 | ~3€ | AliExpress |
@@ -87,21 +87,26 @@ Le fabricant Autoterm/Planar recommande :
 
 | ESP32 GPIO | Pin | Connecté à | Note |
 |------------|-----|------------|------|
-| GPIO16 | RX2 | Display TX | Niveau 5V → diviseur ou MAX3232 |
-| GPIO17 | TX2 | Display RX | Niveau 3.3V → accepté par le display |
-| GPIO22 | RX1 | Heater TX | Niveau 5V → diviseur ou MAX3232 |
-| GPIO23 | TX1 | Heater RX | Niveau 3.3V → accepté par la chaudière |
+| GPIO16 | RX2 | Display TX | 5V → **TXS0108E / BSS138 obligatoire** (ou diviseur temporaire 1k/2k côté RX seulement) |
+| GPIO17 | TX2 | Display RX | 3.3V → 5V via **TXS0108E / BSS138** (3.3V direct peut être sous le seuil haut) |
+| GPIO22 | RX1 | Heater TX | 5V → **TXS0108E / BSS138 obligatoire** |
+| GPIO23 | TX1 | Heater RX | 3.3V → 5V via **TXS0108E / BSS138** |
 | GND | GND | GND commun | **INDISPENSABLE** |
 | VIN | 5V | Buck converter | Alimentation séparée du chauffage |
 
-### ⚠️ ATTENTION NIVEAUX
+### ⚠️ ATTENTION NIVEAUX — OBLIGATOIRE
+
+> ⚠️ **Aucun GPIO de l'ESP32 n'est tolérant 5V** (datasheet ESP32 §3.2 — absolute max 3.6 V).
+> Un signal 5V direct sur un GPIO détruit l'entrée, même si "ça a l'air de marcher" au début.
 
 L'ESP32 utilise du **3.3V**, le protocole Autoterm est en **5V**.
 
-- **TX → RX** (ESP32 vers Autoterm): Le 3.3V est généralement accepté comme HIGH par les récepteurs 5V. **Vérifie** avec un multimètre.
-- **RX ← TX** (Autoterm vers ESP32): Le 5V peut **endommager** l'ESP32. **Il faut** un diviseur de tension (2 resistances) ou un MAX3232.
+- **TX → RX** (ESP32 vers Autoterm — GPIO17/23): le 3.3V peut être sous le seuil haut du chauffage (~3.5V). **Convertisseur obligatoire.**
+- **RX ← TX** (Autoterm vers ESP32 — GPIO16/22): le 5V **détruit** l'ESP32. **Convertisseur obligatoire.** Diviseur 1kΩ/2kΩ uniquement en dépannage temporaire (un seul sens, dégrade le signal).
 
-#### Diviseur de tension simple (2 resistances)
+**Solution recommandée :** 1× **TXS0108E** (8 canaux, couvre les 4 lignes) ou 2× **BSS138**. Voir [WIRING.md](WIRING.md) pour le schéma détaillé.
+
+#### Dépannage temporaire — diviseur de tension (RX uniquement, un seul sens)
 
 ```
 Autoterm TX (5V) ──[1kΩ]──┬── ESP32 RX (3.3V)
@@ -111,7 +116,7 @@ Autoterm TX (5V) ──[1kΩ]──┬── ESP32 RX (3.3V)
                           GND
 ```
 
-Rapport: 5V × (2k / (1k+2k)) = 3.33V ✓
+Rapport: 5V × (2k / (1k+2k)) = 3.33V — **remplacer par un vrai convertisseur dès que possible**.
 
 ---
 

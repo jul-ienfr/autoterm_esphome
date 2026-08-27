@@ -572,11 +572,11 @@ bool AutotermUART::check_frame_timeout_(uint32_t frame_start, uint32_t now) cons
 // ===================
 void AutotermUART::check_uart_loss_(uint32_t now) {
   if (heater_running_ && last_heater_activity_ > 0 &&
-      (now - last_heater_activity_) > UART_LOST_TIMEOUT_MS) {
+      (now - last_heater_activity_) > UART_LOSS_TIMEOUT_MS) {
     if (heater_connected_) {
       heater_connected_ = false;
       ESP_LOGE("autoterm_uart", "HEATER UART LOST! No data received for %u ms",
-               static_cast<unsigned>(UART_LOST_TIMEOUT_MS));
+               static_cast<unsigned>(UART_LOSS_TIMEOUT_MS));
     }
   } else if (!heater_connected_ && last_heater_activity_ > 0) {
     heater_connected_ = true;
@@ -780,9 +780,8 @@ void AutotermUART::update_combustion_efficiency_(float heater_temp, float ambien
   }
 
   // Exhaust temperature alerts (scientific recommendations: 200-400°C optimal range)
-  static uint32_t last_exhaust_alert_ms = 0;
-  if ((now - last_exhaust_alert_ms) > 60000) {  // Check every 60 seconds
-    last_exhaust_alert_ms = now;
+  if ((now - last_exhaust_alert_ms_) > 60000) {  // Check every 60 seconds
+    last_exhaust_alert_ms_ = now;
     if (heater_running_ && effective_exhaust_temp > 50.0f) {
       if (effective_exhaust_temp < 200.0f) {
         ESP_LOGW("autoterm_uart", "EXHAUST LOW: %.0f°C < 200°C — incomplete combustion, soot risk",
@@ -873,9 +872,8 @@ void AutotermUART::update_loop_watchdog_(uint32_t now) {
   last_loop_watchdog_ms_ = now;
 
   // Log watchdog stats every 5 minutes
-  static uint32_t last_watchdog_log = 0;
-  if ((now - last_watchdog_log) > 300000) {
-    last_watchdog_log = now;
+  if ((now - last_watchdog_log_ms_) > 300000) {
+    last_watchdog_log_ms_ = now;
     ESP_LOGI("autoterm_uart", "Watchdog: %lu loops, max_interval=%lums, avg_interval=%lums, free_heap=%u",
              loop_count_, loop_interval_max_ms_, loop_interval_avg_ms_,
              esp_get_free_heap_size());
@@ -996,8 +994,7 @@ void AutotermUART::update_fuel_economy_savings_(uint32_t now) {
   }
 
   // Publish savings percentage every minute
-  static uint32_t last_savings_publish = 0;
-  if ((now - last_savings_publish) > 60000 && fuel_economy_savings_sensor_) {
+  if ((now - last_savings_publish_ms_) > 60000 && fuel_economy_savings_sensor_) {
     float runtime_s = static_cast<float>(runtime_hours_) * 3600.0f;
     if (runtime_s > 60.0f) {
       // Savings = how much time we spent at efficient operation vs total runtime
@@ -1006,7 +1003,7 @@ void AutotermUART::update_fuel_economy_savings_(uint32_t now) {
       fuel_economy_savings_pct_ = std::min(50.0f, fuel_economy_savings_pct_);
       fuel_economy_savings_sensor_->publish_state(fuel_economy_savings_pct_);
     }
-    last_savings_publish = now;
+    last_savings_publish_ms_ = now;
   }
 }
 
@@ -1014,9 +1011,8 @@ void AutotermUART::update_fuel_economy_savings_(uint32_t now) {
 // System health monitoring
 // ===================
 void AutotermUART::update_system_health_(uint32_t now) {
-  static uint32_t last_health_check = 0;
-  if ((now - last_health_check) < 60000) return;  // Check every 60 seconds
-  last_health_check = now;
+  if ((now - last_health_check_ms_) < 60000) return;  // Check every 60 seconds
+  last_health_check_ms_ = now;
 
   // Build health status string
   std::string health;
@@ -1115,10 +1111,9 @@ void AutotermUART::update_prediction_(float temp, uint32_t now) {
   prediction_counts_[hour]++;
 
   // Save every 100 samples
-  static uint32_t prediction_save_counter = 0;
-  prediction_save_counter++;
-  if (prediction_save_counter >= 100) {
-    prediction_save_counter = 0;
+  prediction_save_counter_++;
+  if (prediction_save_counter_ >= 100) {
+    prediction_save_counter_ = 0;
     save_prediction_data_();
   }
 }
@@ -1190,22 +1185,19 @@ void AutotermUART::evaluate_light_sleep_(uint32_t now) {
   // UART wake-up is configured via CONFIG_UART_ISR_IN_IRAM and GPIO wake-up.
   // The ESP32 will wake on any UART activity (heater status frames, display commands).
 
-  static uint32_t last_sleep_log = 0;
-  static bool sleep_mode_active = false;
-
-  if (!sleep_mode_active) {
+  if (!sleep_mode_active_) {
     // Configure UART as wake-up source for light sleep
     gpio_num_t uart_rx_gpio = GPIO_NUM_16;  // uart_panel RX
     esp_sleep_enable_gpio_wakeup();
     // Note: ESPHome's UART component handles the actual GPIO configuration.
     // The sdkconfig PM settings handle automatic light sleep entry/exit.
 
-    sleep_mode_active = true;
+    sleep_mode_active_ = true;
     ESP_LOGI("autoterm_uart", "Light sleep: power management active, CPU will idle-sleep when heater off");
   }
 
-  if ((now - last_sleep_log) > 300000) {  // Every 5 minutes
-    last_sleep_log = now;
+  if ((now - last_sleep_log_ms_) > 300000) {  // Every 5 minutes
+    last_sleep_log_ms_ = now;
     ESP_LOGD("autoterm_uart", "Light sleep: system idle, CPU in low-power mode");
   }
 }
@@ -1249,10 +1241,9 @@ void AutotermUART::evaluate_fuel_economy_reactive_(uint32_t now) {
 // Periodic backup of all persistent data
 // ===================
 void AutotermUART::periodic_backup_(uint32_t now) {
-  static uint32_t last_backup = 0;
-  if ((now - last_backup) < 600000)  // Every 10 minutes
+  if ((now - last_backup_ms_) < 600000)  // Every 10 minutes
     return;
-  last_backup = now;
+  last_backup_ms_ = now;
 
   // Redundant save of all critical data
   maybe_save_runtime_hours_(now, true);
@@ -1440,19 +1431,16 @@ void AutotermUART::evaluate_frost_protection_() {
   }
 
   // Asymmetric hysteresis: delay power increases by 0.4°C, decreases are immediate
-  static uint8_t last_frost_level = 0;
-  static uint32_t last_frost_increase_ms = 0;
-
-  if (target_level > last_frost_level) {
+  if (target_level > last_frost_level_) {
     // Power increase — check if we should delay
     uint32_t now = millis();
-    if (last_frost_increase_ms > 0 && (now - last_frost_increase_ms) < 400) {
+    if (last_frost_increase_ms_ > 0 && (now - last_frost_increase_ms_) < 400) {
       return;  // Delay increase by 0.4 seconds (scaled from 0.4°C concept)
     }
-    last_frost_increase_ms = now;
+    last_frost_increase_ms_ = now;
   }
 
-  last_frost_level = target_level;
+  last_frost_level_ = target_level;
   ESP_LOGW("autoterm_uart", "Frost protection: ext=%.1f°C -> zone level %u", ext_temp, target_level);
   send_power_mode(true, target_level);
   // Do NOT set frost_protection_active_ = false — keep monitoring continuously
@@ -1537,9 +1525,8 @@ void AutotermUART::check_emergency_shutdown_(float heater_temp, float voltage, u
   // 2. During burn-out protection (until exhaust > 200°C and time > 2min, max 4min), only critical over-temp triggers shutdown
   // Voltage dips and flameout are suppressed to prevent damage from incomplete combustion
   if (burnout_protection_active_) {
-    static uint32_t last_burnout_log = 0;
-    if ((millis() - last_burnout_log) > 60000) {
-      last_burnout_log = millis();
+    if ((millis() - last_burnout_log_ms_) > 60000) {
+      last_burnout_log_ms_ = millis();
       ESP_LOGD("autoterm_uart", "Burn-out protection: suppressing non-critical shutdown");
     }
     return;
@@ -2963,18 +2950,20 @@ void AutotermClimate::set_parent(AutotermUART *parent) {
   preset_mode_ = sanitize_preset_(preset_mode_);
   this->mode = climate::CLIMATE_MODE_OFF;
   this->action = climate::CLIMATE_ACTION_OFF;
+  clear_custom_fan_mode_();
   this->fan_mode.reset();
   fan_level_ = clamp_level_(fan_level_);
   {
     std::string fan_label = fan_mode_label_from_level_(fan_level_);
     if (!fan_label.empty())
-      this->set_custom_fan_mode_(fan_label.c_str()); // FIX: Using .c_str()
+      this->set_custom_fan_mode_(fan_label.c_str());
     else
       this->set_fan_mode_(climate::CLIMATE_FAN_OFF);
   }
+  clear_custom_preset_();
   this->preset.reset();
   if (!preset_mode_.empty())
-    this->set_custom_preset_(preset_mode_.c_str()); // FIX: Using .c_str()
+    this->set_custom_preset_(preset_mode_.c_str());
   else
     this->set_preset_(climate::CLIMATE_PRESET_NONE);
 
@@ -2988,10 +2977,11 @@ void AutotermClimate::set_parent(AutotermUART *parent) {
 
 void AutotermClimate::set_default_level(uint8_t level) {
   fan_level_ = clamp_level_(level);
+  clear_custom_fan_mode_();
   this->fan_mode.reset();
   std::string fan_label = fan_mode_label_from_level_(fan_level_);
   if (!fan_label.empty())
-    this->set_custom_fan_mode_(fan_label.c_str()); // FIX: Using .c_str()
+    this->set_custom_fan_mode_(fan_label.c_str());
   else
     this->set_fan_mode_(climate::CLIMATE_FAN_OFF);
 }
@@ -3336,14 +3326,14 @@ void AutotermClimate::apply_state_(climate::ClimateMode mode, const std::string 
 
   this->mode = mode;
 
-  // FIX: Using setters for preset with .c_str()
+  clear_custom_preset_();
   this->preset.reset();
   if (mode != climate::CLIMATE_MODE_FAN_ONLY && mode != climate::CLIMATE_MODE_OFF && !preset_mode_.empty())
     this->set_custom_preset_(preset_mode_.c_str());
   else
     this->set_preset_(climate::CLIMATE_PRESET_NONE);
 
-  // FIX: Using setters for fan mode with .c_str()
+  clear_custom_fan_mode_();
   this->fan_mode.reset();
   {
     std::string fan_label = fan_mode_label_from_level_(fan_level_);

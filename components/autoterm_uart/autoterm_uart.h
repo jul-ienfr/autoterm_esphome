@@ -85,7 +85,6 @@ static constexpr uint32_t FRAME_TIMEOUT_MS = 200;
 static constexpr uint32_t UART_LOSS_TIMEOUT_MS = 10000;
 static constexpr uint32_t COMMAND_RATE_LIMIT_MS = 1000;
 static constexpr uint32_t CRC_SAVE_INTERVAL_MS = 60000;
-static constexpr uint32_t UART_LOST_TIMEOUT_MS = 10000;
 
 // Fuel consumption estimation (Autoterm Air 4D)
 // Approx: 0.15L/h at pump 2Hz, 0.5L/h at pump 6Hz
@@ -546,12 +545,26 @@ class AutotermUART : public Component {
   static constexpr float CO_DANGER_PPM = 35.0f;  // Emergency shutdown above this
   static constexpr uint8_t CO_CONFIRM_REQUIRED = 3;  // Require 3 consecutive readings
 
-  // Timing variables (promoted from static locals in loop)
+  // Timing variables (promoted from static locals in loop/cpp)
   uint32_t last_frost_check_ms_{0};
   bool diagnostic_sent_{false};
   uint32_t last_report_request_ms_{0};
   uint32_t last_maintenance_check_ms_{0};
   uint32_t last_health_log_ms_{0};
+  uint32_t last_altitude_update_ms_{0};
+  uint32_t last_summer_maintenance_ms_{0};
+  // Promoted from function-static locals (cpp)
+  uint32_t last_exhaust_alert_ms_{0};
+  uint32_t last_watchdog_log_ms_{0};
+  uint32_t last_savings_publish_ms_{0};
+  uint32_t last_health_check_ms_{0};
+  uint32_t prediction_save_counter_{0};
+  uint32_t last_sleep_log_ms_{0};
+  bool sleep_mode_active_{false};
+  uint32_t last_backup_ms_{0};
+  uint8_t last_frost_level_{0};
+  uint32_t last_frost_increase_ms_{0};
+  uint32_t last_burnout_log_ms_{0};
 
   // Cached values for safety checks (updated from parse_status)
   float last_heater_temp_c_{NAN};
@@ -827,10 +840,9 @@ class AutotermUART : public Component {
     update_system_health_(now);
 
     // Altitude compensation from GPS HA sensor (every 60s)
-    static uint32_t last_altitude_update = 0;
-    if ((now - last_altitude_update) > 60000) {
+    if ((now - last_altitude_update_ms_) > 60000) {
       update_altitude_compensation_();
-      last_altitude_update = now;
+      last_altitude_update_ms_ = now;
     }
 
     // Active fuel economy: reduce power when near target
@@ -863,14 +875,15 @@ class AutotermUART : public Component {
 
     // Summer maintenance: prevent fuel pump diaphragm stiffening during storage
     // Runs every 14 days in summer months (May-September) when heater hasn't been used for 7+ days
-    static uint32_t last_summer_maintenance_ms = 0;
-    struct tm timeinfo;
-    if (now_local(&timeinfo) && !heater_running_ && !emergency_shutdown_active_ &&
-        timeinfo.tm_mon >= 4 && timeinfo.tm_mon <= 8 &&  // May-September (0-indexed)
-        runtime_hours_ > 10.0f && (now - last_summer_maintenance_ms) > 1209600000) {  // 14 days
-      ESP_LOGI("autoterm_uart", "Summer maintenance: starting 10-min run at level 5 to prevent pump stiffening");
-      send_power_mode(true, 5);
-      last_summer_maintenance_ms = now;
+    {
+      struct tm timeinfo;
+      if (now_local(&timeinfo) && !heater_running_ && !emergency_shutdown_active_ &&
+          timeinfo.tm_mon >= 4 && timeinfo.tm_mon <= 8 &&  // May-September (0-indexed)
+          runtime_hours_ > 10.0f && (now - last_summer_maintenance_ms_) > 1209600000) {  // 14 days
+        ESP_LOGI("autoterm_uart", "Summer maintenance: starting 10-min run at level 5 to prevent pump stiffening");
+        send_power_mode(true, 5);
+        last_summer_maintenance_ms_ = now;
+      }
     }
   }
 

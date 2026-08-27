@@ -350,7 +350,7 @@ CONFIG_SCHEMA = cv.Schema({
     # GPS altitude (from HA Companion App — no hardware needed)
     cv.Optional("gps_altitude"): sensor.sensor_schema(
         unit_of_measurement="m",
-        icon="mdi:map-marker海拔",
+        icon="mdi:map-marker-radius",
         accuracy_decimals=0,
         state_class=const.STATE_CLASS_MEASUREMENT,
     ),

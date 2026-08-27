@@ -77,18 +77,29 @@ Le protocole Autoterm utilise la logique **5V**. Le ESP32 fonctionne en **3.3V**
 
 **Sans convertisseur**, le ESP32 peut ne pas lire correctement les signaux 5V, et le chauffage peut ne pas comprendre les signaux 3.3V.
 
-### Solution 1 : Convertisseur de niveau logique (recommandé)
+### Solution 1 : Convertisseur de niveau logique — OBLIGATOIRE
 
-Utilisez un module **MAX3232** ou **bidirectionnel 3.3V↔5V** :
+> ⚠️ **Aucun GPIO de l'ESP32 n'est tolérant 5V** (datasheet ESP32 §3.2 — absolute max 3.6 V).
+> Un signal 5 V direct sur un GPIO détruit l'entrée, même si "ça a l'air de marcher" au début.
+
+Utilisez un convertisseur **bidirectionnel 3.3 V ↔ 5 V** sur **chaque** ligne (TX et RX, dans les deux directions) :
+
+- **TXS0108E** (8 canaux, le plus simple — 1 module suffit pour les 4 fils)
+- **BSS138** (2 canaux par module — il en faut 2)
+- tout module marqué explicitement **"3.3V ↔ 5V bidirectional level shifter"**
 
 ```
-Autoterm TX (5V) ──► [CONVERTISSEUR] ──► ESP32 RX (3.3V)
-Autoterm RX (5V) ◄── [CONVERTISSEUR] ◄── ESP32 TX (3.3V)
+Autoterm TX (5V) ──► [TXS0108E / BSS138] ──► ESP32 RX (3.3V)
+Autoterm RX (5V) ◄── [TXS0108E / BSS138] ◄── ESP32 TX (3.3V)
 ```
 
-### Solution 2 : Diviseur de tension (pour RX du ESP32 uniquement)
+Répétez le même montage pour les **deux** UART (panneau ET chauffage) — soit 4 lignes au total.
 
-Si le ESP32 lit le 5V (côté RX), un diviseur de tension suffit :
+### Solution 2 : Diviseur de tension — UNIQUEMENT en dépannage temporaire pour RX
+
+Un diviseur 1 kΩ / 2 kΩ abaisse le 5 V vers ~3.3 V **dans un seul sens** (Autoterm TX → ESP32 RX).
+Inconvénients : ne protège **pas** le sens ESP32 TX → Autoterm RX (3.3 V peut être sous le seuil haut du chauffage),
+et la forme du signal se dégrade à 9600 baud sur câbles longs. **Remplacez par un vrai convertisseur dès que possible.**
 
 ```
 Autoterm TX (5V) ──[1kΩ]──┬──► ESP32 RX (GPIO16 ou 22)
@@ -98,13 +109,12 @@ Autoterm TX (5V) ──[1kΩ]──┬──► ESP32 RX (GPIO16 ou 22)
                           GND
 ```
 
-La tension arrive à ~3.3V sur le GPIO du ESP32.
+### Solution 3 : Sans convertisseur — DÉCONSEILLÉE / DANGEREUSE
 
-### Solution 3 : Sans convertisseur (risqué)
-
-Certains GPIO de l'ESP32 sont **tolérants 5V** (GPIO 12-39 sur ESP32 classique). GPIO16, 17, 22, 23 sont dans cette plage. **Mais** :
-- Le ESP32 peut être endommagé à long terme
-- Le TX du ESP32 (3.3V) peut ne pas être compris par le chauffage
+> **Ne branchez JAMAIS un signal 5 V directement sur un GPIO ESP32.**
+> L'affirmation "GPIO 12-39 tolérants 5 V" est **fausse**. Le dépassement cause une dégradation
+> irréversible de l'étage d'entrée et peut tuer l'ESP32 en quelques heures/jours.
+> Le TX 3.3 V de l'ESP32, lui, peut ne pas être reconnu comme niveau haut par le chauffage (seuil ~3.5 V).
 
 ---
 
