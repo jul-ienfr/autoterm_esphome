@@ -97,12 +97,15 @@ Quand activé, le heater envoie un flux de **72 octets** toutes les secondes :
 |--------|-------------|------|
 | 0-1 | État Major/Minor | uint8 |
 | 2-4 | Temps cycle total | uint24 BE |
+| 5-10 | Réservé / non documenté | — |
 | 11-12 | Ventilateur cible/actuel | uint8 (Hz) |
 | 13-16 | Bougie préchauffage cible/actuel | uint16 BE (PWM) |
 | 17 | Pompe carburant | uint8 (/ 100 = Hz) |
 | 18-19 | T° chambre combustion | uint16 BE (Kelvin) |
 | 20-21 | T° flamme | uint16 BE (Kelvin) |
+| 22-23 | Réservé / non documenté | — |
 | 24 | T° externe | int8 (°C) |
 | 25 | T° carte ECU | int8 (°C) |
 | 26-27 | Tension | uint16 BE (/ 10 = V) |
 | 28 | Code défaut | uint8 |
+| 29+ | Réservé / padding | — |

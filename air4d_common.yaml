@@ -1,0 +1,27 @@
+# Commun Autoterm — inclus par air4d.yaml (prod, esp-idf) et air4d_test.yaml (bench, arduino)
+# Usage:  packages: { common: !include air4d_common.yaml }  puis override esp32/framework/logger si besoin
+substitutions:
+  friendly_name: "Autotherm Air4D"
+
+external_components:
+  - source: components
+    components: [autoterm_uart]
+    refresh: 0s
+
+uart:
+  - id: uart_panel
+    rx_pin: GPIO16
+    tx_pin: GPIO17
+    baud_rate: 9600
+    rx_buffer_size: 1024
+    parity: NONE
+    stop_bits: 1
+    data_bits: 8
+  - id: uart_heater
+    rx_pin: GPIO22
+    tx_pin: GPIO23
+    baud_rate: 9600
+    rx_buffer_size: 1024
+    parity: NONE
+    stop_bits: 1
+    data_bits: 8

@@ -477,7 +477,8 @@ autoterm_uart:
   prediction: true  # Active par défaut (apprend les patterns pour préchauffage)
 
   # Light sleep: réduit la consommation quand le chauffage est éteint
-  light_sleep: false  # Activer pour économie d'énergie
+  # Nécessite validation sur HW: vérifie wake UART dual (perte de trames si light_sleep actif)
+  light_sleep: false  # Laisser false par défaut — activer seulement après test banc
 
   # ===== EXTENDED PROTOCOL =====
   # Mode diagnostic: active le flux de télémétrie avancé (72 octets/s)

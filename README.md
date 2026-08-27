@@ -257,7 +257,9 @@ autoterm_uart:
 - [WIRING.md](WIRING.md) — Guide de câblage et pinout
 - [modie.md](modie.md) — Référence du protocole UART
 - [ha_automations.yaml](ha_automations.yaml) — Automatisations HA prêtes (19 automations)
-- [dashboard.html](dashboard.html) — Interface web temps réel
+- [dashboard.html](dashboard.html) — Interface web temps réel (standalone, fallback si HA down)
+- [dashboard_autoterm.yaml](dashboard_autoterm.yaml) — Dashboard Lovelace natif HA (sections thermostat + aero)
+- [secrets.yaml.example](secrets.yaml.example) — Modèle à copier vers `secrets.yaml`
 - [test_uart.ino](test_uart.ino) — Script Arduino pour débugger le hardware
 
 ### Documentation externe recommandée
